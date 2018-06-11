@@ -4,18 +4,16 @@
 from BaseReconstruct import *
 from BaseInfo import *
 import numpy as np
-from scipy.linalg import eigh
 import scipy.interpolate as interpolate
 import time
 
 
-class ReconstructG(BaseReconstruct):
+class ReconstructG(object):
     def __init__(self, base=None, dimage=0.5, lam=1E-3, ratio=25):
         #     def __init__(self, rssfile=None, base=None,dimage=0.5 ,nkernel=201,lam=1E-3,alpha=1,beta=1,ratio=25,waveindex=None):
 
         if (base.dimage != dimage):
             print('Pixel size cannot match')
-            dimage = base.dimage
 
         self.__dict__ = base.__dict__.copy()
 
@@ -25,32 +23,30 @@ class ReconstructG(BaseReconstruct):
         self.ratio = ratio
         self.lam = lam
 
-        # For a single slice
         if self.single:
-            (F, G, G_ivar, F_2, G_2) = self.G_core(self.waveindex, ivar=ivar)
+            (F, G, G_ivar, F_2, G_2, F_cons, G_cons) = self.G_core(self.waveindex, ivar=ivar)
             G_cov = []
-            G_cov.append(self.G_cov_2)
+            G_cov.append(self.G_cov)
             Indicator = self.Indicate.copy()
 
-        # For the spectrum
         else:
             start_time = time.time()
             nWave = self.nWave
-            Indicator, F, F_2, G, G_2, G_ivar= [np.zeros([nWave, self.nside, self.nside])
-                                                                              for i in range(5)]
+            Indicator, F, F_2, G, G_2, G_ivar, F_cons, G_cons = (np.zeros([nWave, self.nside, self.nside]) for i in
+                                                                 range(8))
             G_cov = []
 
             for iWave in self.range:
                 if (iWave % 500 == 0):
                     print('G wavelength channel', iWave)
-                (F[iWave], G[iWave], G_ivar[iWave], F_2[iWave], G_2[iWave]) = self.G_core(iWave, ivar=ivar)
-                G_cov.append(self.G_cov_2)
+                (F[iWave], G[iWave], G_ivar[iWave], F_2[iWave], G_2[iWave], F_cons[iWave], G_cons[iWave]) = self.G_core(
+                    iWave, ivar=ivar)
+                G_cov.append(self.G_cov)
                 Indicator[iWave] = self.Indicate.copy()
 
             stop_time = time.time()
             print("G interation Time = %.2f" % (stop_time - start_time))
 
-        # result assignment
         self.IMGresult = G
         self.PSFresult = G_2
         self.cov = G_cov
@@ -60,41 +56,45 @@ class ReconstructG(BaseReconstruct):
         self.F = F
         self.F2 = F_2
 
+        self.F_cons = F_cons
+        self.PSF_cons = G_cons
+
         if (len(self.range) == self.nWave) and (self.single == False):
             self.analysis()
 
-    # main part for G's method
-    def G_core(self, waveindex, ivar):
+    def G_core(self, iWave, ivar):
         if self.single:
-            self.set_Amatrix(xsample=self.xpos[:, waveindex], ysample=self.ypos[:, waveindex], kernel=self.kernelvalue)
+            self.set_Amatrix(xsample=self.xpos[:, iWave], ysample=self.ypos[:, iWave], kernel=self.kernelvalue)
         else:
-            self.set_Amatrix(xsample=self.xpos[:, waveindex], ysample=self.ypos[:, waveindex],
-                             kernel=self.kernelvalue[waveindex])
-        G_ivar = self.set_fit(ivar=ivar[:, waveindex], lam=self.lam)
-        (F, G) = self.solve_FG(self.value[:, waveindex])
+            self.set_Amatrix(xsample=self.xpos[:, iWave], ysample=self.ypos[:, iWave], kernel=self.kernelvalue[iWave])
+        G_ivar = self.set_fit(ivar=ivar[:, iWave], lam=self.lam)
+        (F, G) = self.solve_FG(self.value[:, iWave])
         if self.single:
             (F_2, G_2) = self.solve_FG(value=self.value_PSF)
+            (F_cons, G_cons) = self.solve_FG(self.value_cons)
         else:
-            (F_2, G_2) = self.solve_FG(value=self.value_PSF[waveindex])
-        return (F, G, G_ivar, F_2, G_2)
+            (F_2, G_2) = self.solve_FG(value=self.value_PSF[iWave])
+            (F_cons, G_cons) = self.solve_FG(self.value_cons[iWave])
+        return (F, G, G_ivar, F_2, G_2, F_cons, G_cons)
 
     def set_Amatrix(self, xsample, ysample, kernel):
-        nsample = len(xsample)
-        dx = np.outer(xsample, np.ones(self.nimage)) - np.outer(np.ones(nsample), self.ximage)
-        dy = np.outer(ysample, np.ones(self.nimage)) - np.outer(np.ones(nsample), self.yimage)
-        dd = np.zeros((nsample * self.nside * self.nside, 2))
+        dx = np.outer(xsample, np.ones(self.nimage)) - np.outer(np.ones(self.nsample), self.ximage)
+        dy = np.outer(ysample, np.ones(self.nimage)) - np.outer(np.ones(self.nsample), self.yimage)
+        dd = np.zeros((self.nsample * self.nside * self.nside, 2))
         dd[:, 0] = dx.flatten()
         dd[:, 1] = dy.flatten()
-        Afull = np.zeros([nsample, self.nside ** 2])
-        for iExp in range(self.nExp):
-            Afull[iExp * self.nFiber:(iExp + 1) * self.nFiber] = interpolate.interpn((self.ykernel, self.xkernel),
-                                                                                     kernel[iExp], dd[
-                                                                                                   iExp * self.nFiber * self.nimage:(
-                                                                                                                                    iExp + 1) * self.nFiber * self.nimage],
-                                                                                     method='linear',
-                                                                                     bounds_error=False,
-                                                                                     fill_value=0.).reshape(self.nFiber,
-                                                                                                            self.nimage)
+        if self.single_kernel:
+            Afull = interpolate.interpn((self.ykernel, self.xkernel), kernel, dd, method='linear', bounds_error=False,
+                                        fill_value=0.).reshape(self.nsample, self.nimage)
+        else:
+            Afull = np.zeros([self.nsample, self.nside ** 2])
+            for iExp in range(self.nExp):
+                Afull[iExp * self.nFiber:(iExp + 1) * self.nFiber] = interpolate.interpn((self.ykernel, self.xkernel),
+                                                                                         kernel[iExp], dd[iExp * self.nFiber * self.nimage:(iExp + 1) * self.nFiber * self.nimage],
+                                                                                         method='linear',
+                                                                                         bounds_error=False,
+                                                                                         fill_value=0.).reshape(self.nFiber, self.nimage)
+
         ineg = np.where(Afull < 0.)
         Afull[ineg] = 0.
 
@@ -104,7 +104,6 @@ class ReconstructG(BaseReconstruct):
         self.A = Afull[:, self.ifit]
         self.nfit = len(self.A[0])
 
-        self.num_remove = self.nside * self.nside - self.nfit
         self.Indicate = np.ones(self.nside * self.nside)
         self.Indicate[self.ifit] = 0
         self.Indicate = self.Indicate.reshape(self.nside, self.nside)
@@ -114,38 +113,31 @@ class ReconstructG(BaseReconstruct):
         A_T = self.A.T
         self.Nmatrix = np.diag(ivar)
 
-        H = np.identity(self.nfit)
+        [U, D, VT] = np.linalg.svd(np.dot(np.diag(np.sqrt(ivar)), self.A), full_matrices=False)
+        Dinv = 1 / D
 
-        self.M0 = np.dot(np.dot(A_T, self.Nmatrix), self.A)
-        M0inv = np.linalg.pinv(self.M0)
-        self.M1 = self.M0 + lam ** 2 * H
-        self.M = self.M0 + 2 * lam ** 2 * H + lam ** 4 * np.dot(np.dot(H, M0inv), H)
-
-        eigvalue, eigvector = eigh(self.M, eigvals_only=False)
-        Q = (eigvector.dot(np.sqrt(np.diag(np.abs(eigvalue))))).dot(eigvector.T)
+        Q = (np.dot(np.dot(VT.transpose(), np.diag(D)), VT))
         sl = Q.sum(axis=1)
         self.Rl = (Q.T / sl.T).T
-        cl = 1 / (sl * sl)
 
-        # G_cov is always diagonal, G_cov_2 is the one we evaluate.
-        # self.G_cov = np.dot(np.dot(self.Rl, np.linalg.pinv(self.M)), np.transpose(self.Rl))
-        self.G_cov_2 = np.dot(
-            np.dot(self.Rl, np.dot(np.dot(np.linalg.pinv(self.M1), self.M0), np.linalg.pinv(self.M1))),
-            np.transpose(self.Rl)) * self.conversion ** 2
-        G_var = self.set_reshape(self.G_cov_2.diagonal())
+        self.A_plus = np.dot(np.dot(VT.T, np.diag(Dinv)), U.T)
+        self.F_cov = np.dot(self.A_plus, self.A_plus.T)
+
+        self.T = np.dot(self.Rl, self.A_plus)
+        self.G_cov = np.dot(self.T, np.transpose(self.T)) * self.conversion ** 2
+        G_var = self.set_reshape(self.G_cov.diagonal())
         G_var[self.Indicate == 1] = 1E12
         G_ivar = 1 / (G_var)
-        return (G_ivar)
+        return G_ivar
 
-    # solve the reconstruction
     def solve_FG(self, value):
-        a = np.dot(np.linalg.pinv(self.M1), np.dot(np.transpose(self.A), np.dot(self.Nmatrix, value))) * self.conversion
+        a = np.dot(np.dot(self.A_plus, np.diag(np.sqrt(np.diag(self.Nmatrix)))), value) * self.conversion
         atilde = np.dot(self.Rl, a)
         F = self.set_reshape(a)
         G = self.set_reshape(atilde)
         return (F, G)
 
-    # convert 1D to 2D squares
+    # convert 1D result to 2D regular grid
     def set_reshape(self, inp):
         result = np.zeros(self.nside ** 2)
         result[self.ifit] = inp
