@@ -8,7 +8,7 @@ import scipy.interpolate as interpolate
 import time
 
 
-class ReconstructG(object):
+class ReconstructG(BaseReconstruct):
     def __init__(self, base=None, dimage=0.5, lam=1E-3, ratio=25):
         #     def __init__(self, rssfile=None, base=None,dimage=0.5 ,nkernel=201,lam=1E-3,alpha=1,beta=1,ratio=25,waveindex=None):
 
@@ -18,13 +18,13 @@ class ReconstructG(object):
         self.__dict__ = base.__dict__.copy()
 
         ivar = self.ivar.copy()
-        ivar[np.where(ivar > 0)] = 1
+        ivar[np.where(ivar >= 0)] = 1
 
         self.ratio = ratio
         self.lam = lam
 
         if self.single:
-            (F, G, G_ivar, F_2, G_2, F_cons, G_cons) = self.G_core(self.waveindex, ivar=ivar)
+            (F, G, G_ivar, F_2, G_2, F_flat, G_flat) = self.G_core(self.waveindex, ivar=ivar)
             G_cov = []
             G_cov.append(self.G_cov)
             Indicator = self.Indicate.copy()
@@ -32,14 +32,14 @@ class ReconstructG(object):
         else:
             start_time = time.time()
             nWave = self.nWave
-            Indicator, F, F_2, G, G_2, G_ivar, F_cons, G_cons = (np.zeros([nWave, self.nside, self.nside]) for i in
+            Indicator, F, F_2, G, G_2, G_ivar, F_flat, G_flat = (np.zeros([nWave, self.nside, self.nside]) for i in
                                                                  range(8))
             G_cov = []
 
             for iWave in self.range:
                 if (iWave % 500 == 0):
                     print('G wavelength channel', iWave)
-                (F[iWave], G[iWave], G_ivar[iWave], F_2[iWave], G_2[iWave], F_cons[iWave], G_cons[iWave]) = self.G_core(
+                (F[iWave], G[iWave], G_ivar[iWave], F_2[iWave], G_2[iWave], F_flat[iWave], G_flat[iWave]) = self.G_core(
                     iWave, ivar=ivar)
                 G_cov.append(self.G_cov)
                 Indicator[iWave] = self.Indicate.copy()
@@ -47,6 +47,7 @@ class ReconstructG(object):
             stop_time = time.time()
             print("G interation Time = %.2f" % (stop_time - start_time))
 
+        ## G's output
         self.IMGresult = G
         self.PSFresult = G_2
         self.cov = G_cov
@@ -56,8 +57,8 @@ class ReconstructG(object):
         self.F = F
         self.F2 = F_2
 
-        self.F_cons = F_cons
-        self.PSF_cons = G_cons
+        self.F_flat = F_flat
+        self.PSF_flat = G_flat
 
         if (len(self.range) == self.nWave) and (self.single == False):
             self.analysis()
@@ -71,11 +72,11 @@ class ReconstructG(object):
         (F, G) = self.solve_FG(self.value[:, iWave])
         if self.single:
             (F_2, G_2) = self.solve_FG(value=self.value_PSF)
-            (F_cons, G_cons) = self.solve_FG(self.value_cons)
+            (F_flat, G_flat) = self.solve_FG(self.value_flat)
         else:
             (F_2, G_2) = self.solve_FG(value=self.value_PSF[iWave])
-            (F_cons, G_cons) = self.solve_FG(self.value_cons[iWave])
-        return (F, G, G_ivar, F_2, G_2, F_cons, G_cons)
+            (F_flat, G_flat) = self.solve_FG(self.value_flat[iWave])
+        return (F, G, G_ivar, F_2, G_2, F_flat, G_flat)
 
     def set_Amatrix(self, xsample, ysample, kernel):
         dx = np.outer(xsample, np.ones(self.nimage)) - np.outer(np.ones(self.nsample), self.ximage)
