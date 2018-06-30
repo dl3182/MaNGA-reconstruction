@@ -67,6 +67,7 @@ class ReconstructShep(BaseReconstruct):
         dy = np.outer(ysample, np.ones(self.nimage)) - np.outer(np.ones(nsample), self.yimage)
         dr = np.sqrt(dx ** 2 + dy ** 2)
         w = np.exp(- 0.5 * dr ** 2 / shepard_sigma ** 2)
+#         w = np.transpose(np.matlib.repmat(ivar != 0, self.nside ** 2, 1)) * np.exp(- 0.5 * dr ** 2 / shepard_sigma ** 2)
         ifit = np.where(dr > 1.6)
         w[ifit] = 0
 
