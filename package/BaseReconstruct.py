@@ -10,12 +10,15 @@ from scipy import signal as sign
 import scipy.interpolate as interpolate
 import time
 
-def Reconstruction(plate=None,ifu=None,dimage=0.75,nkernel=201,waveindex=None,ratio=25,lam=0,single_kernel=None):
+def Reconstruction(plate=None,ifu=None,dimage=0.75,nkernel=201,waveindex=None,ratio=25,lam=0,add_exposures=None,single_kernel=None,cube=None):
     rssfile=getrss(plate=plate,ifu=ifu)
-    base=BaseReconstruct(rssfile=rssfile,dimage=dimage,nkernel=nkernel,waveindex=waveindex,add_exposures=None,single_kernel=single_kernel)
+    base=BaseReconstruct(rssfile=rssfile,dimage=dimage,nkernel=nkernel,waveindex=waveindex,add_exposures=add_exposures,single_kernel=single_kernel)
     Shepard=ReconstructShep(base=base,dimage=dimage)
     G=ReconstructG(base=base,dimage=dimage,ratio=ratio,lam=lam)
-    return (Shepard,G)
+    if cube:
+        Shepard_cube = writecube(rssfile, Shepard, 'Shepard-' + str(plate) + '-' + str(ifu) + '-LOGCUBE')
+        G_cube = writecube(rssfile, G, 'G-' + str(plate) + '-' + str(ifu) + '-LOGCUBE')
+    return (base,Shepard,G)
 
 
 def basekernel(plate=None,ifu=None,dimage=0.75,nkernel=201,waveindex=None,add_exposures=None,single_kernel=None):
@@ -27,11 +30,12 @@ def basekernel(plate=None,ifu=None,dimage=0.75,nkernel=201,waveindex=None,add_ex
 class BaseReconstruct(object):
     def __init__(self, rssfile=None, dimage=0.5, nkernel=201, alpha=1, beta=1, add_exposures=None, single_kernel=None,
                  waveindex=None):
+
+        # reconstruction grid
         self.nFiber = int(rssfile.ifu / 100)
         self.waveindex = waveindex
         self.nkernel = nkernel
         self.dimage = dimage
-        self.single_kernel = single_kernel
 
         self.conversion = dimage ** 2 / np.pi
         self.rough_length = getlength(self.nFiber)
@@ -53,64 +57,62 @@ class BaseReconstruct(object):
         self.x2i, self.y2i = np.meshgrid(self.xi, self.yi)
         self.nimage = self.nside * self.nside
 
+        # Information in RSS file
         self.nExp = rssfile.data[0].header['NEXP']
         self.xpos = rssfile.data['XPOS'].data
         self.ypos = rssfile.data['YPOS'].data
-
-        if add_exposures:
-            nfiber = self.nFiber
-            nsample = self.xpos.shape[0]
-            xpos=self.xpos
-            ypos=self.ypos
-            nset = np.int32(nsample / nfiber / 3)
-            if add_exposures == 4:
-                xadd = np.zeros([4 * nset * nfiber, xpos.shape[1]])
-                yadd = np.zeros([4 * nset * nfiber, ypos.shape[1]])
-                for i in range(nset):
-                    xadd[4 * i * nfiber:(4 * i + 1) * nfiber] = (xpos[3 * i * nfiber:(3 * i + 1) * nfiber, :] + xpos[(3 * i + 1) * nfiber:(3 * i + 2) * nfiber,
-                                                                                                                :] + xpos[(3 * i + 2) * nfiber:3 * (i + 1) * nfiber, :]) / 3
-                    yadd[4 * i * nfiber:(4 * i + 1) * nfiber] = (ypos[3 * i * nfiber:(3 * i + 1) * nfiber, :] + ypos[(3 * i + 1) * nfiber:(3 * i + 2) * nfiber,
-                                                                                                                :] + ypos[(3 * i + 2) * nfiber:3 * (i + 1) * nfiber, :]) / 3
-                    xadd[(4 * i + 1) * nfiber:(4 * i + 2) * nfiber] = (xpos[3 * i * nfiber:(3 * i + 1) * nfiber, :] + xpos[(3 * i + 1) * nfiber:(3 * i + 2) * nfiber,
-                                                                                                                      :]) / 2
-                    xadd[(4 * i + 2) * nfiber:(4 * i + 3) * nfiber] = (xpos[3 * i * nfiber:(3 * i + 1) * nfiber, :] + xpos[(3 * i + 2) * nfiber:(3 * i + 3) * nfiber,
-                                                                                                                      :]) / 2
-                    xadd[(4 * i + 3) * nfiber:(4 * i + 4) * nfiber] = (xpos[3 * i * nfiber:(3 * i + 1) * nfiber, :] + xpos[(3 * i + 2) * nfiber:(3 * i + 3) * nfiber,
-                                                                                                                      :]) / 2
-
-
-                    yadd[(4 * i + 1) * nfiber:(4 * i + 2) * nfiber] = (ypos[3 * i * nfiber:(3 * i + 1) * nfiber, :] + ypos[(3 * i + 1) * nfiber:(3 * i + 2) * nfiber,
-                                                                                                                      :]) / 2
-                    yadd[(4 * i + 2) * nfiber:(4 * i + 3) * nfiber] = (ypos[3 * i * nfiber:(3 * i + 1) * nfiber, :] + ypos[(3 * i + 2) * nfiber:(3 * i + 3) * nfiber,
-                                                                                                                      :]) / 2
-                    yadd[(4 * i + 3) * nfiber:(4 * i + 4) * nfiber] = (ypos[3 * i * nfiber:(3 * i + 1) * nfiber, :] + ypos[(3 * i + 2) * nfiber:(3 * i + 3) * nfiber,
-                                                                                                                      :]) / 2
-            elif add_exposures == 1:
-                xadd = np.zeros([nset * nfiber, xpos.shape[1]])
-                yadd = np.zeros([nset * nfiber, ypos.shape[1]])
-                for i in range(nset):
-                    xadd[i * nfiber:(i + 1) * nfiber] = (xpos[3 * i * nfiber:(3 * i + 1) * nfiber, :] + xpos[(3 * i + 1) * nfiber:(3 * i + 2) * nfiber,
-                                                                                                        :] + xpos[(3 * i + 2) * nfiber:3 * (i + 1) * nfiber, :]) / 3
-                    yadd[i * nfiber:(i + 1) * nfiber] = (ypos[3 * i * nfiber:(3 * i + 1) * nfiber, :] + ypos[(3 * i + 1) * nfiber:(3 * i + 2) * nfiber,
-                                                                                                    :] + ypos[(3 * i + 2) * nfiber:3 * (i + 1) * nfiber, :]) / 3
-            self.xpos = np.concatenate((xpos, xadd), axis=0)
-            self.ypos = np.concatenate((ypos, yadd), axis=0)
-
-        elif add_exposures == 3:
-            xadd1 = self.xpos + 1.2 * np.ones(self.xpos.shape)
-            yadd1 = self.ypos + 0. * np.ones(self.ypos.shape)
-            xadd2 = self.xpos + 0.6 * np.ones(self.xpos.shape)
-            yadd2 = self.ypos + 1.0 * np.ones(self.ypos.shape)
-            self.xpos = np.concatenate((self.xpos, xadd1), axis=0)
-            self.ypos = np.concatenate((self.ypos, yadd1), axis=0)
-            self.xpos = np.concatenate((self.xpos, xadd2), axis=0)
-            self.ypos = np.concatenate((self.ypos, yadd2), axis=0)
-
-        self.nsample = self.xpos.shape[0]
+        self.wave = rssfile.data['WAVE'].data
+        self.nWave = rssfile.data['FLUX'].shape[1]
         self.value = rssfile.data['FLUX'].data
         self.ivar = rssfile.data['IVAR'].data
-        self.nWave = rssfile.data['FLUX'].shape[1]
-        self.wave = rssfile.data['WAVE'].data
+
+        #### add exposures or not
+        self.single_kernel = single_kernel
+        if add_exposures:
+            if (add_exposures == -1):
+                self.xpos = rssfile.data['XPOS'].data[0 * 3 * self.nFiber:3 * self.nFiber]
+                self.ypos = rssfile.data['YPOS'].data[0 * 3 * self.nFiber:3 * self.nFiber]
+            else:
+                xij = self.xpos.copy()
+                yij = self.ypos.copy()
+                self.xpos = np.zeros([1, xij.shape[1]])
+                self.ypos = np.zeros([1, xij.shape[1]])
+                for iset in range(int(self.nExp / 3)):
+                    if (add_exposures == -2):
+                        xiii = rssfile.data['XPOS'].data[(3 * iset + 1) * self.nFiber:(3 * iset + 2) * self.nFiber]
+                        yiii = rssfile.data['YPOS'].data[(3 * iset + 1) * self.nFiber:(3 * iset + 2) * self.nFiber]
+                    else:
+                        # add points between neighbouring fibers
+                        npoints = int(xij.shape[0] / self.nExp * 3)
+                        xii = xij[iset * npoints:(iset + 1) * npoints]
+                        yii = yij[iset * npoints:(iset + 1) * npoints]
+                        di = np.zeros([xii.shape[0], xii.shape[0]])
+                        for i in range(len(xii)):
+                            for j in range(len(xii)):
+                                di[i, j] = (xii[i, 100] - xii[j, 100]) ** 2 + (yii[i, 100] - yii[j, 100]) ** 2
+                            di[i, i] = 100
+                        near = np.zeros(di.shape)
+                        for i in range(xii.shape[0]):
+                            for j in np.arange(0, i):
+                                if di[i, j] < 2.8:
+                                    near[i, j] = 1
+                        indx = np.where(near == 1)[0]
+                        indy = np.where(near == 1)[1]
+
+                        addx = np.zeros([len(indx), self.nWave])
+                        addy = np.zeros([len(indx), self.nWave])
+                        for i in range(len(indx)):
+                            addx[i] = (xii[indx[i]] + xii[indy[i]]) / 2
+                            addy[i] = (yii[indx[i]] + yii[indy[i]]) / 2
+
+                        xiii = np.concatenate((xii, addx), axis=0)
+                        yiii = np.concatenate((yii, addy), axis=0)
+                    self.xpos = np.concatenate((self.xpos, xiii), axis=0)
+                    self.ypos = np.concatenate((self.ypos, yiii), axis=0)
+                self.xpos = self.xpos[1:]
+                self.ypos = self.ypos[1:]
+
+        self.nsample = self.xpos.shape[0]
 
         # kernel construction
         self.xkernel = np.linspace(self.xmin + self.length / self.nkernel, self.xmax - self.length / self.nkernel,
@@ -132,10 +134,10 @@ class BaseReconstruct(object):
         obsinfo = rssfile.data['OBSINFO'].data
         fwhm0 = obsinfo.field('SEEING') * obsinfo.field('PSFFAC')
         lambda0 = 5500
-
         self.fwhm = [[fwhm0[i] * math.pow(lambda0 / self.wave[j], 1 / 5) for i in range(fwhm0.shape[0])] for j in
                      range(nWave)]
 
+        ## raw image
         signal = np.zeros((nWave, self.nside, self.nside))
         signal[:, int((self.nside - 1) / 2), int((self.nside - 1) / 2)] = 1
 
@@ -166,7 +168,7 @@ class BaseReconstruct(object):
         self.kernelvalue = kernelvalue
         self.value_PSF = value_PSF
         self.imagevalue = imagevalue
-        self.value_cons = np.ones(self.value_PSF.shape)
+        self.value_flat = np.ones(self.value_PSF.shape)
 
     def kernel_core(self, fwhm, waveindex, signal):
         if self.single_kernel:
