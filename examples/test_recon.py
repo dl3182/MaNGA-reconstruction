@@ -1,3 +1,5 @@
+# This file is to test reconstruction result. 
+
 # BaseRun.basekernel(plate,ifu,dimage=0.75,nkernel=201,waveindex=None,add_exposures=None,single_kernel=None)
 
 # parameters:
