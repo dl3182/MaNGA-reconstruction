@@ -1,9 +1,3 @@
-
-import time
-
-from BaseRun import *
-
-
 # BaseRun.basekernel(plate,ifu,dimage=0.75,nkernel=201,waveindex=None,add_exposures=None,single_kernel=None)
 
 # parameters:
@@ -50,6 +44,9 @@ from BaseRun import *
 #     F_flat: the deconvolved result with regard to a flat field.
 
 
+import time
+
+from BaseRun import *
 
 start_time = time.time()
 plate=8551
