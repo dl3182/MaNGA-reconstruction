@@ -6,7 +6,7 @@ import numpy as np
 import time
 
 
-class ReconstructShep(object):
+class ReconstructShep(BaseReconstruct):
     def __init__(self, base=None, dimage=0.5):
         #     def __init__(self, rssfile=None, dimage=0.5,nkernel=201,alpha=1,beta=1,waveindex=None):
         #         BaseReconstruct.__init__(self,rssfile=rssfile, dimage=dimage,nkernel=nkernel,alpha=1,beta=1,waveindex=waveindex)
@@ -16,21 +16,21 @@ class ReconstructShep(object):
 
         Shepard_cov = []
         if self.single:
-            Shepard, Shepard_2, Shep_cov, Shepard_ivar, Shepard_cons = self.Shepard_core(self.waveindex)
+            Shepard, Shepard_2, Shep_cov, Shepard_ivar, Shepard_flat = self.Shepard_core(self.waveindex)
 
             Shepard_cov.append(Shep_cov)
             Indicator = self.Indicate.copy()
         else:
             start_time = time.time()
 
-            nWave = base.nWave
-            Indicator, Shepard, Shepard_2, Shepard_ivar, Shepard_cons = (np.zeros((nWave, self.nside, self.nside)) for i
+            nWave = self.nWave
+            Indicator, Shepard, Shepard_2, Shepard_ivar, Shepard_flat = (np.zeros((nWave, self.nside, self.nside)) for i
                                                                          in range(5))
 
             for iWave in self.range:
                 if (iWave % 1000 == 0):
                     print('Shepard wavelength channel', iWave)
-                Shepard[iWave], Shepard_2[iWave], Shep_cov, Shepard_ivar[iWave], Shepard_cons[
+                Shepard[iWave], Shepard_2[iWave], Shep_cov, Shepard_ivar[iWave], Shepard_flat[
                     iWave] = self.Shepard_core(iWave)
                 Shepard_cov.append(Shep_cov)
                 Indicator[iWave] = self.Indicate.copy()
@@ -44,7 +44,7 @@ class ReconstructShep(object):
         self.ivariance = Shepard_ivar
         self.Indicator = Indicator
 
-        self.PSF_cons = Shepard_cons
+        self.PSF_flat = Shepard_flat
 
         if ((len(self.range) == self.nWave) and (self.waveindex == None)):
             self.analysis()
@@ -55,18 +55,18 @@ class ReconstructShep(object):
         Shepard = self.solve_Shepard(value=self.value[:, iWave])
         if self.single:
             Shepard_2 = self.solve_Shepard(value=self.value_PSF)
-            Shepard_cons = self.solve_Shepard(value=self.value_cons)
+            Shepard_flat = self.solve_Shepard(value=self.value_flat)
         else:
             Shepard_2 = self.solve_Shepard(value=self.value_PSF[iWave])
-            Shepard_cons = self.solve_Shepard(value=self.value_cons[iWave])
-        return (Shepard, Shepard_2, Shep_cov, Shepard_ivar, Shepard_cons)
+            Shepard_flat = self.solve_Shepard(value=self.value_flat[iWave])
+        return (Shepard, Shepard_2, Shep_cov, Shepard_ivar, Shepard_flat)
 
     def set_fit(self, ivar, xsample, ysample, shepard_sigma=0.7):
         nsample = len(xsample)
         dx = np.outer(xsample, np.ones(self.nimage)) - np.outer(np.ones(nsample), self.ximage)
         dy = np.outer(ysample, np.ones(self.nimage)) - np.outer(np.ones(nsample), self.yimage)
         dr = np.sqrt(dx ** 2 + dy ** 2)
-        w = np.transpose(np.matlib.repmat(ivar != 0, self.nside ** 2, 1))*np.exp(- 0.5 * dr ** 2 / shepard_sigma ** 2)
+        w = np.exp(- 0.5 * dr ** 2 / shepard_sigma ** 2)
         ifit = np.where(dr > 1.6)
         w[ifit] = 0
 
