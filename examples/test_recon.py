@@ -12,9 +12,9 @@ from BaseRun import *
 # nkernel: the number of pixels when constructing the kernel on a finer grid
 # waveindex: the index of wavelength, None means the whole spectrum
 # add_exposures: means whether add extra exposures for a simulation
+#     0: actual dithering sampling
 #     1: add the central point for ditherings
-#     3: add offset ditherings
-#     4: add the averages of three exposures of ditherings
+#     -1: dithering with only one set of observation
 # single_kernel:means whether we use kernel for single exposure to speed up the program, True means using.
 # return:
 #     a class which includes the information of the kernel
@@ -33,27 +33,32 @@ from BaseRun import *
 # ratio:the criterion to select the pixels in the G's configuration
 # lam: the regularization coefficient for G's method
 # single_kernel:means whether we use kernel for single exposure to speed up the program, True means using.
+# cube: means whether we store the output into a fits file.
+
 # return:
-#    two classes which includes the information of Shepard and G
+#    one class of grid and two classes which includes the information of Shepard and G
 # quantities:
 # IMGresult: the true reconstruction with regard to real flux
 # PSFreulst: the simulation reconstruction with regard to a point source
-# PSF_cons: the simulation result with regard to a flat field
+# PSF_flat: the simulation result with regard to a flat field
 # cov: the covariance of the reconstruction
 # ivariance: the inverse of the diagonal of the covariance
 # Indicator: the selected pixels for each wavelength
 # For G, the quantities also include
 #     F: the deconvolved result with regard to real flux
 #     F2: the deconvolved result with regard to a point source
-#     F_cons: the deconvolved result with regard to a flat field.
+#     F_flat: the deconvolved result with regard to a flat field.
+
 
 
 start_time = time.time()
 plate=8551
-ifu=1902
-Shepard,G = Reconstruction(plate=plate,ifu=ifu,waveindex=2000)
+ifu = 1902
+sliceShepard,sliceG = Reconstruction(plate=plate,ifu=ifu,waveindex=2000)
 
-base=basekernel(plate=plate,ifu=ifu,add_exposures=4,single_kernel=10)
+base,Shepard,G = Reconstruction(plate=plate,ifu=ifu)
+
+base=basekernel(plate=plate,ifu=ifu,add_exposures=1,single_kernel=10)
 
 stop_time= time.time()
 
