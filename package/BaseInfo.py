@@ -1,5 +1,34 @@
 # This file is the base functions involved in the analysis
 
+## functions will be used during the analysis
+#-------------------------------------------------
+# getrss(plate=None, ifu=None, release='MPL-5'):
+# getcube(plate=None, ifu=None, release='MPL-5'):
+#    input: plate,ifu
+#    output: rss file
+#-------------------------------------------------
+# getlength(x):
+# parameters:
+#    x: number of fibers of ifu
+# return:
+#    the initial rough length of reconstruction grid in arcsec.
+#-------------------------------------------------
+# PSFaverage(color,wave,PSF):
+# parameters:
+#   color: the band of filter, which can choose,'g','r','i','z'
+#   wave: the wavelength of the spectrum
+#   PSF: the input image for the whole spectrum
+#-------------------------------------------------
+# gaussian(rs, pars):
+# residuals(pars, rs, ks):
+# FWHM(xi, yi, PSF, xpsf=0, ypsf=0):
+# parameters:
+#   xi,yi: coordinates of each pixel
+#   PSF: the image used to calculate the FWHM
+#   xpsf,ypsf: the offset of center
+# return:
+#   
+#-------------------------------------------------
 
 import numpy as np
 import marvin.tools.rss as rss
