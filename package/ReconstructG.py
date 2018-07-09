@@ -10,8 +10,9 @@ import time
 
 class ReconstructG(BaseReconstruct):
     def __init__(self, base=None, dimage=0.5, lam=1E-3, ratio=25):
-        #     def __init__(self, rssfile=None, base=None,dimage=0.5 ,nkernel=201,lam=1E-3,alpha=1,beta=1,ratio=25,waveindex=None):
-
+        #     def __init__(self, rssfile=None, base=None,dimage=0.5 ,dkernel=0.1,lam=1E-3,alpha=1,beta=1,ratio=25,waveindex=None):
+#         BaseReconstruct.__init__(self ,rssfile=rssfile, dimage=dimage ,dkernel=dkernel,alpha=1,beta=1,waveindex=waveindex)
+        
         if (base.dimage != dimage):
             print('Pixel size cannot match')
 
@@ -57,9 +58,11 @@ class ReconstructG(BaseReconstruct):
         self.F = F
         self.F2 = F_2
 
+        # flat field
         self.F_flat = F_flat
         self.PSF_flat = G_flat
 
+        # calculate average for each band
         if (len(self.range) == self.nWave) and (self.single == False):
             self.analysis()
 
@@ -78,6 +81,7 @@ class ReconstructG(BaseReconstruct):
             (F_flat, G_flat) = self.solve_FG(self.value_flat[iWave])
         return (F, G, G_ivar, F_2, G_2, F_flat, G_flat)
 
+    # kernel matrix
     def set_Amatrix(self, xsample, ysample, kernel):
         dx = np.outer(xsample, np.ones(self.nimage)) - np.outer(np.ones(self.nsample), self.ximage)
         dy = np.outer(ysample, np.ones(self.nimage)) - np.outer(np.ones(self.nsample), self.yimage)
@@ -110,6 +114,7 @@ class ReconstructG(BaseReconstruct):
         self.Indicate = self.Indicate.reshape(self.nside, self.nside)
         return
 
+    # transformation from fiber to regular grid
     def set_fit(self, ivar, lam):
         A_T = self.A.T
         self.Nmatrix = np.diag(ivar)
@@ -131,6 +136,7 @@ class ReconstructG(BaseReconstruct):
         G_ivar = 1 / (G_var)
         return G_ivar
 
+    # result of reconstruction
     def solve_FG(self, value):
         a = np.dot(np.dot(self.A_plus, np.diag(np.sqrt(np.diag(self.Nmatrix)))), value) * self.conversion
         atilde = np.dot(self.Rl, a)
@@ -145,6 +151,7 @@ class ReconstructG(BaseReconstruct):
         result = result.reshape(self.nside, self.nside)
         return result
 
+    # result of each band
     def analysis(self):
         self.GPSF = PSFaverage('g', self.wave, self.PSFresult)
         self.GIMG = PSFaverage('g', self.wave, self.IMGresult)
