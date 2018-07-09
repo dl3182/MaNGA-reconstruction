@@ -10,9 +10,9 @@ from scipy import signal as sign
 import scipy.interpolate as interpolate
 import time
 
-def Reconstruction(plate=None,ifu=None,dimage=0.75,nkernel=201,waveindex=None,ratio=25,lam=0,add_exposures=None,single_kernel=None,cube=None):
+def Reconstruction(plate=None,ifu=None,dimage=0.75,dkernel=0.1,waveindex=None,ratio=25,lam=0,add_exposures=None,single_kernel=None,cube=None):
     rssfile=getrss(plate=plate,ifu=ifu)
-    base=BaseReconstruct(rssfile=rssfile,dimage=dimage,nkernel=nkernel,waveindex=waveindex,add_exposures=add_exposures,single_kernel=single_kernel)
+    base=BaseReconstruct(rssfile=rssfile,dimage=dimage,dkernel=dkernel,waveindex=waveindex,add_exposures=add_exposures,single_kernel=single_kernel)
     Shepard=ReconstructShep(base=base,dimage=dimage)
     G=ReconstructG(base=base,dimage=dimage,ratio=ratio,lam=lam)
     if cube:
@@ -21,20 +21,19 @@ def Reconstruction(plate=None,ifu=None,dimage=0.75,nkernel=201,waveindex=None,ra
     return (base,Shepard,G)
 
 
-def basekernel(plate=None,ifu=None,dimage=0.75,nkernel=201,waveindex=None,add_exposures=None,single_kernel=None):
+def basekernel(plate=None,ifu=None,dimage=0.75,dkernel=0.1,waveindex=None,add_exposures=None,single_kernel=None):
     rssfile=getrss(plate=plate,ifu=ifu)
-    base=BaseReconstruct(rssfile=rssfile,dimage=dimage,nkernel=nkernel,add_exposures=add_exposures,single_kernel=single_kernel,waveindex=waveindex)
+    base=BaseReconstruct(rssfile=rssfile,dimage=dimage,dkernel=dkernel,add_exposures=add_exposures,single_kernel=single_kernel,waveindex=waveindex)
     return (base)
 
 
 class BaseReconstruct(object):
-    def __init__(self, rssfile=None, dimage=0.5, nkernel=201, alpha=1, beta=1, add_exposures=None, single_kernel=None,
+    def __init__(self, rssfile=None, dimage=0.5, dkernel=0.1, alpha=1, beta=1, add_exposures=None, single_kernel=None,
                  waveindex=None):
 
         # reconstruction grid
         self.nFiber = int(rssfile.ifu / 100)
         self.waveindex = waveindex
-        self.nkernel = nkernel
         self.dimage = dimage
 
         self.conversion = dimage ** 2 / np.pi
@@ -54,7 +53,7 @@ class BaseReconstruct(object):
                                               np.ones(self.nside))).flatten()
         self.xi = np.linspace(self.xmin + 0.5 * self.dimage, self.xmax - 0.5 * self.dimage, self.nside)
         self.yi = np.linspace(self.ymin + 0.5 * self.dimage, self.ymax - 0.5 * self.dimage, self.nside)
-        self.x2i, self.y2i = np.meshgrid(self.xi, self.yi)
+#         self.x2i, self.y2i = np.meshgrid(self.xi, self.yi)
         self.nimage = self.nside * self.nside
 
         # Information in RSS file
@@ -115,11 +114,11 @@ class BaseReconstruct(object):
         self.nsample = self.xpos.shape[0]
 
         # kernel construction
-        self.xkernel = np.linspace(self.xmin + self.length / self.nkernel, self.xmax - self.length / self.nkernel,
-                                   self.nkernel)
-        self.ykernel = np.linspace(self.ymin + self.length / self.nkernel, self.ymax - self.length / self.nkernel,
-                                   self.nkernel)
+        self.nkernel=np.int32(self.length/dkernel)
+        self.xkernel = np.linspace(self.xmin + 0.5*dkernel, self.xmax - 0.5*dkernel,self.nkernel)
+        self.ykernel = np.linspace(self.ymin + 0.5*dkernel, self.ymax - 0.5*dkernel,self.nkernel)
         self.x2k, self.y2k = np.meshgrid(self.xkernel, self.ykernel)
+        
         # fiber
         self.radius = np.sqrt(self.x2k * self.x2k + self.y2k * self.y2k)
         self.fiber = np.zeros([self.nkernel, self.nkernel])
@@ -196,19 +195,21 @@ class BaseReconstruct(object):
         gaus = gaus / gaus.sum()
         return gaus
 
+    # set kernel
     def set_PSFvalue(self, fwhmw, raw, alpha=1, beta=1):
         kernel = self.PSFfcn(self.x2k, self.y2k, fwhmw, alpha)
         kernel = sign.fftconvolve(self.fiber, kernel, mode='same')
         kernelvalue = kernel * self.nkernel ** 2 / self.nside ** 2
 
         dd = np.zeros((self.nimage, 2))
-        dd[:, 0] = self.x2i.flatten()
-        dd[:, 1] = self.y2i.flatten()
+        dd[:, 0] = self.ximage
+        dd[:, 1] = self.yimage
         PSFvalue = interpolate.interpn((self.ykernel, self.xkernel), kernelvalue, dd, method='linear',
                                        bounds_error=False, fill_value=0.).reshape(self.nside, self.nside)
         imagevalue = sign.convolve2d(raw, PSFvalue, mode='same', boundary='symm')
         return (kernelvalue, imagevalue)
 
+    # set the fiber value
     def sample_value(self, xsample, ysample, kernelvalue, xpsf=0., ypsf=0.):
         dx = xsample - xpsf
         dy = ysample - ypsf
