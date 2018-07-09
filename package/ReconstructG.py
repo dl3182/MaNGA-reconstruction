@@ -114,9 +114,8 @@ class ReconstructG(BaseReconstruct):
         self.Indicate = self.Indicate.reshape(self.nside, self.nside)
         return
 
-    # transformation from fiber to regular grid
+    # transformation from fiber to regular grid with SVD
     def set_fit(self, ivar, lam):
-        A_T = self.A.T
         self.Nmatrix = np.diag(ivar)
 
         [U, D, VT] = np.linalg.svd(np.dot(np.diag(np.sqrt(ivar)), self.A), full_matrices=False)
@@ -132,7 +131,7 @@ class ReconstructG(BaseReconstruct):
         self.T = np.dot(self.Rl, self.A_plus)
         self.G_cov = np.dot(self.T, np.transpose(self.T)) * self.conversion ** 2
         G_var = self.set_reshape(self.G_cov.diagonal())
-        G_var[self.Indicate == 1] = 1E12
+        G_var[self.Indicate == 1] = 1E12 # avoid 1/0
         G_ivar = 1 / (G_var)
         return G_ivar
 
