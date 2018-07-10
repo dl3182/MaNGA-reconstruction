@@ -8,8 +8,8 @@ import time
 
 class ReconstructShep(BaseReconstruct):
     def __init__(self, base=None, dimage=0.5):
-        #     def __init__(self, rssfile=None, dimage=0.5,nkernel=201,alpha=1,beta=1,waveindex=None):
-        #         BaseReconstruct.__init__(self,rssfile=rssfile, dimage=dimage,nkernel=nkernel,alpha=1,beta=1,waveindex=waveindex)
+        #     def __init__(self, rssfile=None, dimage=0.5,dkernel=0.1,alpha=1,beta=1,waveindex=None):
+        #         BaseReconstruct.__init__(self ,rssfile=rssfile, dimage=dimage ,dkernel=dkernel,alpha=alpha,beta=beta,waveindex=waveindex)
         if (base.dimage != dimage):
             print('Pixel size cannot match')
         self.__dict__ = base.__dict__.copy()
@@ -38,6 +38,7 @@ class ReconstructShep(BaseReconstruct):
             stop_time = time.time()
             print("Shepard interation Time = %.2f" % (stop_time - start_time))
 
+        # output of Shepard's method
         self.IMGresult = Shepard
         self.PSFresult = Shepard_2
         self.cov = Shepard_cov
@@ -46,7 +47,8 @@ class ReconstructShep(BaseReconstruct):
 
         self.PSF_flat = Shepard_flat
 
-        if ((len(self.range) == self.nWave) and (self.waveindex == None)):
+        # calculate average for each band
+        if ((len(self.range) == self.nWave) and (self.single == False)):
             self.analysis()
 
     def Shepard_core(self, iWave):
@@ -61,13 +63,14 @@ class ReconstructShep(BaseReconstruct):
             Shepard_flat = self.solve_Shepard(value=self.value_flat[iWave])
         return (Shepard, Shepard_2, Shep_cov, Shepard_ivar, Shepard_flat)
 
+    # Shepard's method
     def set_fit(self, ivar, xsample, ysample, shepard_sigma=0.7):
         nsample = len(xsample)
         dx = np.outer(xsample, np.ones(self.nimage)) - np.outer(np.ones(nsample), self.ximage)
         dy = np.outer(ysample, np.ones(self.nimage)) - np.outer(np.ones(nsample), self.yimage)
         dr = np.sqrt(dx ** 2 + dy ** 2)
         w = np.exp(- 0.5 * dr ** 2 / shepard_sigma ** 2)
-#         w = np.transpose(np.matlib.repmat(ivar != 0, self.nside ** 2, 1)) * np.exp(- 0.5 * dr ** 2 / shepard_sigma ** 2)
+#         w = np.transpose(np.matlib.repmat(ivar != 0, self.nside ** 2, 1)) * np.exp(- 0.5 * dr ** 2 / shepard_sigma ** 2) # considering the bad fibers
         ifit = np.where(dr > 1.6)
         w[ifit] = 0
 
@@ -90,10 +93,12 @@ class ReconstructShep(BaseReconstruct):
         Shep_ivar[np.where(Shep_ivar > 1E30)] == 0
         return (Shep_cov, Shep_ivar)
 
+    # Shepard's result
     def solve_Shepard(self, value):
         Shep = (self.wwT.dot(value)).reshape(self.nside, self.nside) * self.conversion
         return Shep
 
+    # result of each band
     def analysis(self):
         self.GPSF = PSFaverage('g', self.wave, self.PSFresult)
         self.GIMG = PSFaverage('g', self.wave, self.IMGresult)
