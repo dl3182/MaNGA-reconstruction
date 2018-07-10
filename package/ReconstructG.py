@@ -8,10 +8,10 @@ import scipy.interpolate as interpolate
 import time
 
 
-class ReconstructG(BaseReconstruct):
+class ReconstructG(object):
     def __init__(self, base=None, dimage=0.5, lam=1E-3, ratio=25):
         #     def __init__(self, rssfile=None, base=None,dimage=0.5 ,dkernel=0.1,lam=1E-3,alpha=1,beta=1,ratio=25,waveindex=None):
-#         BaseReconstruct.__init__(self ,rssfile=rssfile, dimage=dimage ,dkernel=dkernel,alpha=1,beta=1,waveindex=waveindex)
+        #         BaseReconstruct.__init__(self ,rssfile=rssfile, dimage=dimage ,dkernel=dkernel,alpha=1,beta=1,waveindex=waveindex)
         
         if (base.dimage != dimage):
             print('Pixel size cannot match')
