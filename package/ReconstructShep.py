@@ -6,7 +6,7 @@ import numpy as np
 import time
 
 
-class ReconstructShep(BaseReconstruct):
+class ReconstructShep(object):
     def __init__(self, base=None, dimage=0.5):
         #     def __init__(self, rssfile=None, dimage=0.5,dkernel=0.1,alpha=1,beta=1,waveindex=None):
         #         BaseReconstruct.__init__(self ,rssfile=rssfile, dimage=dimage ,dkernel=dkernel,alpha=alpha,beta=beta,waveindex=waveindex)
