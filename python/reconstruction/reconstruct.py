@@ -343,6 +343,43 @@ class Reconstruct(object):
         gaus = (gaus1 + scale21 * gaus2) / (1. + scale21)
         return gaus
 
+    def _create_kernel(self, fwhm=None, dimage_kernel=0.05):
+        """Create a kernel image
+
+        Parameters:
+        ----------
+
+        fwhm : float, np.float32
+            FWHM of seeing
+
+        dimage_kernel : float, np.float32
+            pixel scale for kernel grid in arcsec (default: 0.05)
+
+        Return:
+        ------
+
+        kernel : ndarray of np.float32
+            image of the kernel
+"""
+        # Create the spatial grid for the kernel
+        if(not hasattr(self, 'nkernel')):
+            self._set_kernel_grid(dimage_kernel=dimage_kernel)
+
+        # Create the top hat fiber image
+        if(not hasattr(self, 'fiber')):
+            radius = np.sqrt(self.x2k**2 + self.y2k**2)
+            fiber = np.zeros([self.nside_kernel, self.nside_kernel],
+                             dtype=np.float32)
+            ifiber = np.where(radius < 1.0)
+            fiber[ifiber] = 1.
+            self.fiber = fiber / fiber.sum()
+
+        psf = self.psf(fwhm, self.x2k, self.y2k)
+        psf = psf / psf.sum()
+        kernel = (sign.fftconvolve(self.fiber, psf, mode='same') * np.pi /
+                  dimage_kernel**2)
+        return(kernel)
+
     def set_kernel(self, dimage_kernel=0.05):
         """Set the kernel for each wavelength and exposure
 
@@ -366,28 +403,17 @@ class Reconstruct(object):
          .kernel - kernel at each wavelength and exposure
                    [nWave, nExp, nside_kernel, nside_kernel]
 """
-        # Create the spatial grid for the kernel
-        self._set_kernel_grid(dimage_kernel=dimage_kernel)
-
-        # Create the top hat fiber image
-        radius = np.sqrt(self.x2k**2 + self.y2k**2)
-        fiber = np.zeros([self.nside_kernel, self.nside_kernel],
-                         dtype=np.float32)
-        ifiber = np.where(radius < 1.0)
-        fiber[ifiber] = 1.
-        self.fiber = fiber / fiber.sum()
-
-        # Now convolve with PSF for each exposure and wavelength
-        self.kernel = np.zeros([self.nWave, self.nExp,
-                                self.nside_kernel, self.nside_kernel],
-                               dtype=np.float32)
+        # Determine PSF for each exposure and wavelength
         for iWave in np.arange(self.nWave):
             for iExp in np.arange(self.nExp):
-                psf = self.psf(self.fwhm[iWave, iExp], self.x2k, self.y2k)
-                psf = psf / psf.sum()
-                tmp_kernel = sign.fftconvolve(self.fiber, psf, mode='same')
-                self.kernel[iWave, iExp, :, :] = (tmp_kernel * np.pi /
-                                                  dimage_kernel**2)
+                kernel = self._create_kernel(fwhm=self.fwhm[iWave, iExp],
+                                             dimage_kernel=dimage_kernel)
+                if(not hasattr(self, 'kernel')):
+                    self.kernel = np.zeros([self.nWave, self.nExp,
+                                            self.nside_kernel,
+                                            self.nside_kernel],
+                                           dtype=np.float32)
+                self.kernel[iWave, iExp, :, :] = kernel
 
     def normalize_weights(self, w):
         """Normalize weights
