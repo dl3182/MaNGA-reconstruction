@@ -869,7 +869,7 @@ class ReconstructG(Reconstruct):
 """
         self.ifit, A = self.set_Amatrix(xsample, ysample, kernel, ratio)
         self.nfit = len(A[0])
-        [U, D, VT] = np.linalg.svd(np.dot(np.diag(np.sqrt(ivar)), self.A), full_matrices=False)
+        [U, D, VT] = np.linalg.svd(np.dot(np.diag(np.sqrt(ivar)), A), full_matrices=False)
         Dinv = 1 / D
 
         Q = (np.dot(np.dot(VT.transpose(), np.diag(D)), VT))
