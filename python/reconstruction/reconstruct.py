@@ -337,7 +337,7 @@ class Reconstruct(object):
 
         self.kernelvalue = np.zeros([self.nWave, len(self.runExp), self.nkernel, self.nkernel], dtype=np.float32)
         start_time = time.time()
-        self.kernelbase = np.loadtxt('../data/kernelvalue_8.txt')
+        self.kernelbase = np.loadtxt('../data/kernelvalue_7.txt')
         stop_time = time.time()
         print("kernel loading time = %.2f" % (stop_time - start_time))
 
