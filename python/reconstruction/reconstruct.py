@@ -7,6 +7,7 @@ import scipy.interpolate as interpolate
 import marvin.tools.rss as rss
 from marvin import config
 from scipy.optimize import leastsq
+from astropy.io import fits
 import time
 
 # Set Marvin configuration so it gets everything local
@@ -337,12 +338,12 @@ class Reconstruct(object):
 
         self.kernelvalue = np.zeros([self.nWave, len(self.runExp), self.nkernel, self.nkernel], dtype=np.float32)
         start_time = time.time()
-        self.kernelbase = np.loadtxt('../data/kernelvalue_7.txt')
+        kernelfile = fits.open('../data/k8.fits.gz')
+        self.kernelbase = kernelfile[0].data
         stop_time = time.time()
         print("kernel loading time = %.2f" % (stop_time - start_time))
 
-        self.nkernelbase = int(np.sqrt(self.kernelbase.shape[1]))
-        self.kernelbase = self.kernelbase.reshape(self.kernelbase.shape[0], self.nkernelbase, self.nkernelbase)
+        self.nkernelbase = self.kernelbase.shape[1]
         start_time = time.time()
         for iWave in np.arange(self.nWave):
             for index, iExp in enumerate(self.runExp):
