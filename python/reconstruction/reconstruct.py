@@ -7,6 +7,7 @@ import scipy.interpolate as interpolate
 import marvin.tools.rss as rss
 from marvin import config
 from scipy.optimize import leastsq
+from astropy.io import fits
 import time
 
 # Set Marvin configuration so it gets everything local
@@ -57,7 +58,7 @@ class Reconstruct(object):
 
     set_image_grid(dimage) : Set up the spatial grid for the cube
 
-    set_ker(fwhm): Return value of kernel for given FWHM
+    _kernel(fwhm): Return value of kernel for given FWHM
 
     set_kernel(fwhm) : Create the kernel estimation from accessing to data base
 
@@ -337,21 +338,21 @@ class Reconstruct(object):
 
         self.kernelvalue = np.zeros([self.nWave, len(self.runExp), self.nkernel, self.nkernel], dtype=np.float32)
         start_time = time.time()
-        self.kernelbase = np.loadtxt('../data/kernelvalue_7.txt')
+        kernelfile = fits.open('../data/k8.fits.gz')
+        self.kernelbase = kernelfile[0].data
         stop_time = time.time()
         print("kernel loading time = %.2f" % (stop_time - start_time))
 
-        self.nkernelbase = int(np.sqrt(self.kernelbase.shape[1]))
-        self.kernelbase = self.kernelbase.reshape(self.kernelbase.shape[0], self.nkernelbase, self.nkernelbase)
+        self.nkernelbase = self.kernelbase.shape[1]
         start_time = time.time()
         for iWave in np.arange(self.nWave):
             for index, iExp in enumerate(self.runExp):
-                self.kernelvalue[iWave, index, :, :] = self.set_ker(
+                self.kernelvalue[iWave, index, :, :] = self._kernel(
                     self.fwhm[iWave, index]) * self.nkernel ** 2 / self.nside ** 2
         stop_time = time.time()
         print("kernel construction time = %.2f" % (stop_time - start_time))
 
-    def set_ker(self, fwhm):
+    def _kernel(self, fwhm):
         """acquire kernel values corresponding to a given fwhm
 
         Parameters:
@@ -577,11 +578,11 @@ class Reconstruct(object):
           .cube_ivar - inverse variance of cube of simulation as ndarray of np.float32
                        [nside, nside, nWave]
 """
-        self.cube_psf, self.cube_psf_ivar = self.set_calculate(self.flux_psf, self.flux_psf_ivar, self.weights_psf)
-        self.cube, self.cube_ivar = self.set_calculate(self.flux, self.flux_ivar, self.weights)
+        self.cube_psf, self.cube_psf_ivar = self.calculate_cube(self.flux_psf, self.flux_psf_ivar, self.weights_psf)
+        self.cube, self.cube_ivar = self.calculate_cube(self.flux, self.flux_ivar, self.weights)
         return
 
-    def set_calculate(self, flux, flux_ivar, weights):
+    def calculate_cube(self, flux, flux_ivar, weights):
         """calculate cube and cube inverse variance for given flux
 
         Parameters:
@@ -661,7 +662,7 @@ class Reconstruct(object):
         plt.title('reconstruction of ' + keyword + ' slice')
         plt.colorbar(label='flux')
 
-    def analysis(self):
+    def set_band(self):
         """ set average result for each band simulation and RSS and its FWHM
 
         Notes:
@@ -1258,7 +1259,7 @@ def set_G(plate=None, ifu=None, release=None, waveindex=None, expindex=None):
     stop_time = time.time()
     print("calculation time = %.2f" % (stop_time - start_time))
     if (len(base.wave) == base.flux.shape[1]):
-        base.analysis()
+        base.set_band()
     return base
 
 
@@ -1300,5 +1301,5 @@ def set_Shepard(plate=None, ifu=None, release=None, waveindex=None, expindex=Non
     stop_time = time.time()
     print("calculation time = %.2f" % (stop_time - start_time))
     if (len(base.wave) == base.flux.shape[1]):
-        base.analysis()
+        base.set_band()
     return base
