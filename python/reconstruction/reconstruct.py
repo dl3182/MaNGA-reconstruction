@@ -2,13 +2,13 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
-from scipy import signal as sign
 import scipy.interpolate as interpolate
 import marvin.tools.rss as rss
 from marvin import config
 from scipy.optimize import leastsq
 from astropy.io import fits
 import time
+import os
 
 # Set Marvin configuration so it gets everything local
 config.setRelease('MPL-6')
@@ -41,52 +41,48 @@ class Reconstruct(object):
     rss : RSS object
         Marvin RSS output
 
+
+    addexps : int, np int32, whether to add additional dithered exposures (default: None)
+        addexps=1 means triple times exposures, addexps=2 means nine times exposures
+
     waveindex : int, np.int32
         indices of wavelengths to reconstruct (default None)
-
-    expindex : int, np.int32
-        indices of exposures to use (default None)
 
     Methods:
     -------
 
     set_rss() : Acquire the RSS data
 
+    set_image_grid(dimage) : Set up the spatial grid for the cube
+
+    set_kernel(fwhm) : Create the kernel estimation from accessing to data base
+
     set_flux_rss() : Set the flux used for reconstruction from RSS
 
     set_flux_psf() : Set the flux used for reconstruction to a PSF
 
-    set_image_grid(dimage) : Set up the spatial grid for the cube
-
-    _kernel(fwhm): Return value of kernel for given FWHM
-
-    set_kernel(fwhm) : Create the kernel estimation from accessing to data base
-
-    psf(fwhm, x, y) : Return values of the PSF shape
-
-    set_kernel_2(dkernel): Create the kernel estimation from calculation
-
-    normalize_weights(w) : Normalize the weights
+    set_weights() : Set the weights for mapping spectra to cube
 
     create_weights() : Calculate the weights for mapping spectra to cube
 
-    set_weights() : Set the weights for mapping spectra to cube
+    normalize_weights(w) : Normalize the weights
 
     set_cube() : Calculates and sets cube for both RSS and simulation
 
-    calculate(self,flux,flux_ivar): Calculate the result for given flux and flux_ivar
+    calculate_cube(self,flux,flux_ivar): Calculate the result for given flux and flux_ivar
 
     covar() : Calculates covariance matrix for a slice of the cube
 
     plot_slice() : Plots a slice of the cube
+
+    set_band(): Set band average and its FWHM for the simulation spectrum
 
     Notes:
     ------
 
     Additional attributes are set by the methods, as documented.
 
-    Unless waveindex or expindex is set, uses all wavelengths and all
-    exposures.
+    Unless waveindex is set, uses all wavelengths.
 
     Typical usage would be (for a limited number of wavelengths):
 
@@ -103,19 +99,17 @@ class Reconstruct(object):
 
 """
 
-    def __init__(self, plate=None, ifu=None, release='MPL-5', waveindex=None, expindex=None):
+    def __init__(self, plate=None, ifu=None, release='MPL-5', waveindex=None, addexps=None):
         self.plate = plate
         self.ifu = ifu
         self.plateifu = "{plate}-{ifu}".format(plate=self.plate, ifu=self.ifu)
         self.release = release
         self.nfiber = int(self.ifu / 100)
         self.rss = None
+        self.addexps = addexps
         self.waveindex = waveindex
         if (self.waveindex is not None):
             self.waveindex = self._arrayify_int32(self.waveindex)
-        self.expindex = expindex
-        if (self.expindex is not None):
-            self.expindex = self._arrayify_int32(self.expindex)
         return
 
     def _arrayify_int32(self, quantity):
@@ -136,8 +130,8 @@ class Reconstruct(object):
 
          .rss - Marvin RSS object
          .nExp - Number of exposures
-         .xpos - X positions of each fiber [nExp * nfiber, nWave]
-         .ypos - Y positions of each fiber [nExp * nfiber, nWave]
+         .xpos - X positions of each fiber [3**addexps * nExp * nfiber, nWave]
+         .ypos - Y positions of each fiber [3**addexps * nExp * nfiber, nWave]
          .wave - Selected wavelength grid [nWave]
          .nWave - Size of wavelength grid
          .obsinfo - Observing information object
@@ -146,12 +140,25 @@ class Reconstruct(object):
 """
         self.rss = rss.RSS(plateifu=self.plateifu, release=self.release)
         self.nExp = self.rss.data[0].header['NEXP']
-        if (self.expindex is not None):
-            self.runExp = self.expindex
-        else:
-            self.runExp = np.arange(self.nExp)
         self.xpos = self.rss.data['XPOS'].data
         self.ypos = self.rss.data['YPOS'].data
+
+        if (self.addexps == 1) or (self.addexps == 2):
+            xpos1 = self.rss.data['XPOS'].data + 2.5 / 3
+            ypos1 = self.rss.data['YPOS'].data
+            xpos2 = self.rss.data['XPOS'].data + 2.5 / 3 / 2
+            ypos2 = self.rss.data['YPOS'].data - 2.5 / 6 * np.sqrt(3)
+            self.xpos = np.concatenate((np.concatenate((self.xpos, xpos1), axis=0), xpos2), axis=0)
+            self.ypos = np.concatenate((np.concatenate((self.ypos, ypos1), axis=0), ypos2), axis=0)
+            if (self.addexps == 2):
+                xpos1 = self.xpos + 2.5 / 6
+                ypos1 = self.ypos + 2.5 / 6 / np.sqrt(3)
+                xpos2 = self.xpos + 2.5 / 6
+                ypos2 = self.ypos - 2.5 / 6 / np.sqrt(3)
+
+                self.xpos = np.concatenate((np.concatenate((self.xpos, xpos1), axis=0), xpos2), axis=0)
+                self.ypos = np.concatenate((np.concatenate((self.ypos, ypos1), axis=0), ypos2), axis=0)
+
         self.wave = self.rss.data['WAVE'].data
         self.nWave = self.rss.data['FLUX'].shape[1]
         # Use waveindex if that was set
@@ -224,91 +231,6 @@ class Reconstruct(object):
         self.ymax = 0.5 * self.length
         return
 
-    def psf(self, fwhm, x, y):
-        """Return value(s) of PSF
-
-        Parameters:
-        ----------
-
-        fwhm : float, np.float32
-            FWHM (in same units as x and y)
-
-        x : float, np.float32, or np.ndarray of np.float32
-            x position(s) to evaluate
-
-        y : float, np.float32, or np.ndarray of np.float32
-            y position(s) to evaluate
-
-
-        Returns:
-        -------
-
-        val : float, np.float32, or np.ndarray of np.float32
-            PSF value at x and y positions
-
-        Notes:
-        -----
-
-        Uses an arbitrarily chosen double Gaussian PSF.
-        Normalized per unit coordinate in same units as FWHM.
-"""
-        sig1 = fwhm / 2.355 / 1.05  # factor 1.05 to handle second Gaussian
-        sig2 = 2. * sig1
-        gaus1 = (np.exp(-(x ** 2 + y ** 2) / (2 * sig1 ** 2)) /
-                 (2 * np.pi * sig1 ** 2))
-        gaus2 = (np.exp(-(x ** 2 + y ** 2) / (2 * sig2 ** 2)) /
-                 (2 * np.pi * sig2 ** 2))
-        scale21 = 1. / 9.
-        gaus = (gaus1 + scale21 * gaus2) / (1. + scale21)
-        gaus = gaus / gaus.sum()
-        return gaus
-
-    def set_kernel_2(self, dkernel=0.05):
-        """Set the kernel for each wavelength and exposure
-
-        Parameters:
-        ----------
-
-        dkernel : float, np.float32
-            pixel scale for kernel grid in arcsec (default: 0.05)
-
-        Notes:
-        -----
-
-        Sets attributes:
-
-         .x2k - 2-D array of X positions of kernel grid
-         .y2k - 2-D array of Y positions of kernel grid
-         .xkernel - 1-D array of X positions of kernel grid
-         .ykernel - 1-D array of Y positions of kernel grid
-         .nkernel - number of pixels on a side of kernel image
-         .fiber - unconvolved image of fiber [nside_kernel, nside_kernel]
-         .kernelvalue - kernel at each wavelength and exposure
-                   [nWave, nExp, nkernel, nkernel]
-"""
-        self.dkernel = dkernel
-        (self.nkernel, length, self.x2k, self.y2k, self.xkernel, self.ykernel) = self._create_grid(self.dkernel)
-
-        radius = np.sqrt(self.x2k ** 2 + self.y2k ** 2)
-        fiber = np.zeros([self.nkernel, self.nkernel],
-                         dtype=np.float32)
-        ifiber = np.where(radius < 1.0)
-        fiber[ifiber] = 1.
-        self.fiber = fiber / fiber.sum()
-
-        self.kernelvalue = np.zeros([self.nWave, len(self.runExp), self.nkernel, self.nkernel], dtype=np.float32)
-
-        start_time = time.time()
-        for iWave in np.arange(self.nWave):
-            if (iWave % 1000 == 10):
-                print('kernel reconstruction', iWave)
-            for index, iExp in enumerate(self.runExp):
-                psf = self.psf(self.fwhm[iWave, index], self.x2k, self.y2k)
-                self.kernelvalue[iWave, index, :, :] = sign.fftconvolve(self.fiber, psf,
-                                                                        mode='same') * self.nkernel ** 2 / self.nside ** 2
-        stop_time = time.time()
-        print("kernel construction time = %.2f" % (stop_time - start_time))
-
     def set_kernel(self, dkernel=0.05):
         """Set the kernel for each wavelength and exposure
 
@@ -330,27 +252,14 @@ class Reconstruct(object):
          .nkernel - number of pixels on a side of kernel image
          .kernelbase - 3D array of kernel data used to access kernel value [250,nkernelbase,nkernelbase]
          .nkernelbase - number of pixels on a side of base kernel slice
-         .kernelvalue - kernel at each wavelength and exposure
-                   [nWave, nExp, nkernel, nkernel]
 """
         self.dkernel = dkernel
         (self.nkernel, length, self.x2k, self.y2k, self.xkernel, self.ykernel) = self._create_grid(self.dkernel)
 
-        self.kernelvalue = np.zeros([self.nWave, len(self.runExp), self.nkernel, self.nkernel], dtype=np.float32)
-        start_time = time.time()
-        kernelfile = fits.open('../data/k8.fits.gz')
+        kernelfile = fits.open('../data/kernel_database.fits')
         self.kernelbase = kernelfile[0].data
-        stop_time = time.time()
-        print("kernel loading time = %.2f" % (stop_time - start_time))
-
+        kernelfile.close()
         self.nkernelbase = self.kernelbase.shape[1]
-        start_time = time.time()
-        for iWave in np.arange(self.nWave):
-            for index, iExp in enumerate(self.runExp):
-                self.kernelvalue[iWave, index, :, :] = self._kernel(
-                    self.fwhm[iWave, index]) * self.nkernel ** 2 / self.nside ** 2
-        stop_time = time.time()
-        print("kernel construction time = %.2f" % (stop_time - start_time))
 
     def _kernel(self, fwhm):
         """acquire kernel values corresponding to a given fwhm
@@ -393,15 +302,15 @@ class Reconstruct(object):
         -----
 
         Requires set_kernel() to have already been called to set the
-        appropriate kernels for each exposure and wavelength.
+        flux for each exposure and wavelength.
 
         Only uses wavelengths specified by the object's waveindex attribute.
 
         Sets attributes:
 
-         .flux - flux in each fiber [nExp * nfiber, nWave]
-         .flux_ivar - inverse variance of flux in each fiber
-                      [nExp * nfiber, nWave]
+         .flux_psf - flux in each fiber for simulation [3**addexps * nExp * nfiber, nWave]
+         .flux_psf_ivar - inverse variance of flux in each fiber for simulation
+                      [3**addexps * nExp * nfiber, nWave]
 
 """
         if (xcen is None):
@@ -410,33 +319,35 @@ class Reconstruct(object):
             ycen = 0.
 
         self.flux_psf = np.zeros([self.xpos.shape[0], self.nWave])
-        self.flux_psf_ivar = np.ones([self.nExp * self.nfiber, self.nWave],
+        self.flux_psf_ivar = np.ones([self.xpos.shape[0], self.nWave],
                                      dtype=np.float32)
         start_time = time.time()
         for iWave in np.arange(self.nWave):
-            if (self.expindex is None):
-                for iExp in np.arange(self.nExp):
-                    xsample = self.xpos[iExp * self.nfiber:(iExp + 1) * self.nfiber, iWave]
-                    ysample = self.ypos[iExp * self.nfiber:(iExp + 1) * self.nfiber, iWave]
-                    dx = xsample - xcen
-                    dy = ysample - ycen
-                    dd = np.zeros((len(xsample), 2))
-                    dd[:, 0] = dx.flatten()
-                    dd[:, 1] = dy.flatten()
-                    self.flux_psf[iExp * self.nfiber:(iExp + 1) * self.nfiber, iWave] = interpolate.interpn(
-                        (self.xkernel, self.ykernel), self.kernelvalue[iWave, iExp], dd, method='linear',
-                        bounds_error=False, fill_value=0.)
-            else:
-                xsample = self.xpos[:, iWave]
-                ysample = self.ypos[:, iWave]
+            for iExp in np.arange(self.nExp):
+                xsample = self.xpos[iExp * self.nfiber:(iExp + 1) * self.nfiber, iWave]
+                ysample = self.ypos[iExp * self.nfiber:(iExp + 1) * self.nfiber, iWave]
                 dx = xsample - xcen
                 dy = ysample - ycen
                 dd = np.zeros((len(xsample), 2))
                 dd[:, 0] = dx.flatten()
                 dd[:, 1] = dy.flatten()
-                self.flux_psf[:, iWave] = interpolate.interpn((self.xkernel, self.ykernel), self.kernelvalue[iWave, 0],
-                                                              dd, method='linear',
-                                                              bounds_error=False, fill_value=0.)
+                kernelvalue = self._kernel(self.fwhm[iWave, iExp]) * self.nkernel ** 2 / self.nside ** 2
+                self.flux_psf[iExp * self.nfiber:(iExp + 1) * self.nfiber, iWave] = interpolate.interpn(
+                    (self.xkernel, self.ykernel), kernelvalue, dd, method='linear',
+                    bounds_error=False, fill_value=0.)
+            if (self.xpos.shape[0] > (self.nExp * self.nfiber)):
+                # If adding additional exposures, using average kernel to estimate
+                xsample = self.xpos[self.nExp * self.nfiber:, iWave]
+                ysample = self.ypos[self.nExp * self.nfiber:, iWave]
+                dx = xsample - xcen
+                dy = ysample - ycen
+                dd = np.zeros((len(xsample), 2))
+                dd[:, 0] = dx.flatten()
+                dd[:, 1] = dy.flatten()
+                kernelvalue = self._kernel(np.mean(self.fwhm[iWave, :])) * self.nkernel ** 2 / self.nside ** 2
+                self.flux_psf[self.nExp * self.nfiber:, iWave] = interpolate.interpn((self.xkernel, self.ykernel),
+                                                                                     kernelvalue, dd, method='linear',
+                                                                                     bounds_error=False, fill_value=0.)
         stop_time = time.time()
         print("fiber flux time = %.2f" % (stop_time - start_time))
 
@@ -469,29 +380,29 @@ class Reconstruct(object):
         Uses the create_weights() method for the object. Loops over
         wavelength and stores the weights.
 
-        Sets the .weights/.weights_psf attribute to an ndarray of np.float32, of
-        the shape: [nWave, nside * nside, nExp * nfiber]
+        Sets attributes:
+        .weights - an ndarray of np.float32, [nWave, nside * nside, nExp * nfiber]
+        .weights_psf - an ndarray of np.float32, [nWave, nside * nside, 3**addexps * nExp * nfiber]
 
 """
         self.weights = np.zeros([self.nWave, self.nside * self.nside,
                                  self.nExp * self.nfiber])
         self.weights_psf = np.zeros([self.nWave, self.nside * self.nside,
-                                     self.nExp * self.nfiber])
+                                     self.xpos.shape[0]])
         for iWave in np.arange(self.nWave):
-            wwT = self.create_weights(xsample=self.xpos[:, iWave],
-                                      ysample=self.ypos[:, iWave],
+            wwT = self.create_weights(xsample=self.xpos[0:self.nExp * self.nfiber, iWave],
+                                      ysample=self.ypos[0:self.nExp * self.nfiber, iWave],
                                       ivar=self.flux_ivar[:, iWave],
-                                      kernel=self.kernelvalue[iWave],
+                                      waveindex=iWave,
                                       **kwargs)
             self.weights[iWave, :, :] = wwT
             wwT = self.create_weights(xsample=self.xpos[:, iWave],
                                       ysample=self.ypos[:, iWave],
-                                      ivar=self.flux_psf_ivar[:, iWave],
-                                      kernel=self.kernelvalue[iWave],
+                                      ivar=self.flux_psf_ivar[:, iWave], waveindex=iWave,
                                       **kwargs)
             self.weights_psf[iWave, :, :] = wwT
 
-    def create_weights(self, xsample=None, ysample=None, ivar=None, kernel=None):
+    def create_weights(self, xsample=None, ysample=None, ivar=None, waveindex=None):
         """Calculate weights for nearest fiber
 
         Parameters:
@@ -613,7 +524,7 @@ class Reconstruct(object):
                                                                   self.nside) *
                      self.conversion)
             cube[:, :, iWave] = fcube
-            covar = self.covar(iWave, flux_ivar)
+            covar = self.covar(iWave, flux_ivar, weights[iWave])
             var = np.diagonal(covar)
             igt0 = np.where(var > 0)[0]
             ivar = np.zeros(self.nside * self.nside, dtype=np.float32)
@@ -622,7 +533,7 @@ class Reconstruct(object):
                                                    self.nside])
         return (cube, cube_ivar)
 
-    def covar(self, iWave=None, flux_ivar=None):
+    def covar(self, iWave=None, flux_ivar=None, weights=None):
         """Return cube covariance matrix for a wavelength
 
         Parameters:
@@ -637,12 +548,28 @@ class Reconstruct(object):
         covar : ndarray of np.float32 [nside * nside, nside * nside]
 """
         iok = np.where(flux_ivar[:, iWave] > 0)[0]
-        wwT = (self.weights[iWave, :, :])[:, iok]
-        covar = wwT.dot(np.diag(self.flux_ivar[iok, iWave])).dot(wwT.T)
+        wwT = (weights[:, :])[:, iok]
+        covar = wwT.dot(np.diag(flux_ivar[iok, iWave])).dot(wwT.T)
         return (covar)
 
-    def plot_slice(self, iWave=None, keyword=None, vmax=None, vmin=0.):
-        """Plot a slice of the cube"""
+    def plot_slice(self, iWave=0, keyword=None, vmax=None, vmin=0.):
+        """Plot a slice of the cube
+
+        Parameters:
+        ----------
+
+        iWave : int, np.int32(default: 0, meaning index of single wavelength)
+            index of wavelength to show
+
+        keyword : string
+            'simulation': using fake psf data for simulation
+            'real' : using real fiber data
+
+        Returns:
+        -------
+
+        covar : ndarray of np.float32 [nside * nside, nside * nside]
+"""
         if keyword == 'simulation':
             target = self.cube_psf[:, :, iWave]
         else:
@@ -782,103 +709,6 @@ class Reconstruct(object):
         return PSF_ave
 
 
-class add_exposures(Reconstruct):
-    """add exposures for current configuration
-
-    Attributes:
-    ----------
-
-    plate : int, np.int32
-        plate number
-
-    ifu : int, np.int32
-        IFU number
-
-    nfiber : int
-        number of fibers
-
-    release : str
-        data release (default 'MPL-5')
-
-    rss : RSS object
-        Marvin RSS output
-
-    waveindex : int, np.int32
-        indices of wavelengths to reconstruct (default None)
-
-    expindex : int, np.int32
-        indices of exposures to use (default None)
-
-    Methods:
-    -------
-
-    set_rss() : Acquire the RSS data
-
-    set_flux_rss() : Set the flux used for reconstruction from RSS
-
-    set_flux_psf() : Set the flux used for reconstruction to a PSF
-
-    set_image_grid() : Set up the spatial grid for the cube
-
-    set_kernel() : Create the kernel estimation
-
-    Notes:
-    ------
-
-    Additional attributes are set by the methods, as documented.
-
-    Unless waveindex or expindex is set, uses all wavelengths and all
-    exposures.
-
-    Typical usage would be (for a limited number of wavelengths):
-
-     import reconstruction
-     r = reconstruction.set_base(plate=8485, ifu=3701, waveindex=None,expindex=None)
-     r.set_rss() # Gets and reads in the RSS file (sets .rss attribute)
-     r.set_image_grid() # Creates the output image spatial grid
-     r.set_kernel() # Sets the kernel for every wavelength and exposure
-     r.set_flux_rss() # Sets up to use the RSS fluxes (sets .flux, .flux_ivar)
-     r.set_flux_psf(xcen=0.5, ycen=1.5) # Puts fake data into PSF fluxes (sets .flux_psf, .flux_ivar_psf)
-
-"""
-
-    def set_rss(self):
-        self.rss = rss.RSS(plateifu=self.plateifu, release=self.release)
-        self.nExp = self.rss.data[0].header['NEXP']
-        if (self.expindex is not None):
-            self.runExp = self.expindex
-        else:
-            self.runExp = np.arange(self.nExp)
-
-        xpos0 = self.rss.data['XPOS'].data
-        ypos0 = self.rss.data['YPOS'].data
-        xpos1 = self.rss.data['XPOS'].data + 2.5 / 2 / 2
-        ypos1 = self.rss.data['YPOS'].data + 2.5 / 2 / np.sqrt(3) / 2
-        xpos2 = self.rss.data['XPOS'].data + 2.5 / 2 / 2
-        ypos2 = self.rss.data['YPOS'].data - 2.5 / 2 / np.sqrt(3) / 2
-        self.xpos = np.concatenate((np.concatenate((xpos0, xpos1), axis=0), xpos2), axis=0)
-        self.ypos = np.concatenate((np.concatenate((ypos0, ypos1), axis=0), ypos2), axis=0)
-
-        self.wave = self.rss.data['WAVE'].data
-        self.nWave = self.rss.data['FLUX'].shape[1]
-        # Use waveindex if that was set
-        if (self.waveindex is not None):
-            self.nWave = len(self.waveindex)
-            self.wave = self.wave[self.waveindex]
-
-        # Set FWHM values as a function of wavelength
-        self.obsinfo = self.rss.data['OBSINFO'].data
-        self.fwhm0 = (self.obsinfo.field('SEEING') *
-                      self.obsinfo.field('PSFFAC'))
-
-        lambda0 = 5500.
-        self.fwhm = [[self.fwhm0[i] * math.pow(lambda0 / self.wave[j], 1. / 5.)
-                      for i in range(self.fwhm0.shape[0])]
-                     for j in range(self.nWave)]
-        self.fwhm = np.array(self.fwhm)
-        return
-
-
 class ReconstructShepard(Reconstruct):
     """Reconstruction of cubes from Shepards method
 
@@ -903,67 +733,58 @@ class ReconstructShepard(Reconstruct):
     waveindex : int, np.int32
         indices of wavelengths to reconstruct (default None)
 
-    expindex : int, np.int32
-        indices of exposures to use (default None)
-
     Methods:
     -------
 
     set_rss() : Acquire the RSS data
 
+    set_image_grid(dimage) : Set up the spatial grid for the cube
+
+    set_kernel(fwhm) : Create the kernel estimation from accessing to data base
+
     set_flux_rss() : Set the flux used for reconstruction from RSS
 
     set_flux_psf() : Set the flux used for reconstruction to a PSF
 
-    set_image_grid(dimage) : Set up the spatial grid for the cube
-
-    set_ker(fwhm): Return value of kernel for given FWHM
-
-    set_kernel(fwhm) : Create the kernel estimation from accessing to data base
-
-    psf(fwhm, x, y) : Return values of the PSF shape
-
-    set_kernel_2(dkernel): Create the kernel estimation from calculation
-
-    normalize_weights(w) : Normalize the weights
+    set_weights() : Set the weights for mapping spectra to cube
 
     create_weights() : Calculate the weights for mapping spectra to cube
 
-    set_weights() : Set the weights for mapping spectra to cube
+    normalize_weights(w) : Normalize the weights
 
     set_cube() : Calculates and sets cube for both RSS and simulation
 
-    calculate(self,flux,flux_ivar): Calculate the result for given flux and flux_ivar
+    calculate_cube(self,flux,flux_ivar): Calculate the result for given flux and flux_ivar
 
     covar() : Calculates covariance matrix for a slice of the cube
 
     plot_slice() : Plots a slice of the cube
+
+    set_band(): Set band average and its FWHM for the simulation spectrum
 
     Notes:
     ------
 
     Additional attributes are set by the methods, as documented.
 
-    Unless waveindex or expindex is set, uses all wavelengths and all
-    exposures.
+    Unless waveindex is set, uses all wavelengths.
 
     Typical usage would be (for a limited number of wavelengths):
 
      import reconstruction
-     r = reconstruction.ReconstructShepard(plate=8485, ifu=3701, waveindex=[1000, 2000])
+     r = reconstruction.Reconstruct(plate=8485, ifu=3701, waveindex=[1000, 2000])
      r.set_rss() # Gets and reads in the RSS file (sets .rss attribute)
      r.set_image_grid() # Creates the output image spatial grid
      r.set_kernel() # Sets the kernel for every wavelength and exposure
      r.set_flux_rss() # Sets up to use the RSS fluxes (sets .flux, .flux_ivar)
-     r.set_flux_psf(xcen=0.5, ycen=1.5) # Puts fake data into PSF fluxes (sets .flux_psf, .flux_ivar_psf)
+     r.set_flux_psf(xcen=0.5, ycen=1.5) # Puts fake data into PSF fluxes (sets .flux_psf, .flux_psf_ivar)
      r.set_weights() # Sets the weights (sets .weights)
      r.set_cube() # Sets the weights (sets .cube, .cube_ivar)
      r.plot_slice(0)
-
 """
 
     def create_weights(self, xsample=None, ysample=None,
-                       ivar=None, kernel=None, shepard_sigma=0.7):
+                       ivar=None, waveindex=None, shepard_sigma=0.7):
         """Calculate weights for Shepards method
 
         Parameters:
@@ -999,7 +820,7 @@ class ReconstructShepard(Reconstruct):
               np.outer(np.ones(nsample, dtype=np.float32), self.y2i.flatten()))
         dr = np.sqrt(dx ** 2 + dy ** 2)
 
-        w = np.transpose(np.matlib.repmat(ivar != 0, self.nside ** 2, 1)) * np.exp(- 0.5 * dr ** 2 / shepard_sigma ** 2)
+        w = np.exp(- 0.5 * dr ** 2 / shepard_sigma ** 2)
         ifit = np.where(dr > 1.6)
         w[ifit] = 0
 
@@ -1031,68 +852,58 @@ class ReconstructG(Reconstruct):
     waveindex : int, np.int32
         indices of wavelengths to reconstruct (default None)
 
-    expindex : int, np.int32
-        indices of exposures to use (default None)
-
     Methods:
     -------
 
     set_rss() : Acquire the RSS data
 
+    set_image_grid(dimage) : Set up the spatial grid for the cube
+
+    set_kernel(fwhm) : Create the kernel estimation from accessing to data base
+
     set_flux_rss() : Set the flux used for reconstruction from RSS
 
     set_flux_psf() : Set the flux used for reconstruction to a PSF
 
-    set_image_grid(dimage) : Set up the spatial grid for the cube
-
-    set_ker(fwhm): Return value of kernel for given FWHM
-
-    set_kernel(fwhm) : Create the kernel estimation from accessing to data base
-
-    psf(fwhm, x, y) : Return values of the PSF shape
-
-    set_kernel_2(dkernel): Create the kernel estimation from calculation
-
-    normalize_weights(w) : Normalize the weights
+    set_weights() : Set the weights for mapping spectra to cube
 
     create_weights() : Calculate the weights for mapping spectra to cube
 
-    set_Amatrix(): Calculate weight matrix between fiber and kernel grid
-
-    set_weights() : Set the weights for mapping spectra to cube
+    normalize_weights(w) : Normalize the weights
 
     set_cube() : Calculates and sets cube for both RSS and simulation
 
-    calculate(self,flux,flux_ivar): Calculate the result for given flux and flux_ivar
+    calculate_cube(self,flux,flux_ivar): Calculate the result for given flux and flux_ivar
 
     covar() : Calculates covariance matrix for a slice of the cube
 
     plot_slice() : Plots a slice of the cube
+
+    set_band(): Set band average and its FWHM for the simulation spectrum
 
     Notes:
     ------
 
     Additional attributes are set by the methods, as documented.
 
-    Unless waveindex or expindex is set, uses all wavelengths and all
-    exposures.
+    Unless waveindex is set, uses all wavelengths.
 
     Typical usage would be (for a limited number of wavelengths):
 
      import reconstruction
-     r = reconstruction.ReconstructG(plate=8485, ifu=3701, waveindex=[1000, 2000])
+     r = reconstruction.Reconstruct(plate=8485, ifu=3701, waveindex=[1000, 2000])
      r.set_rss() # Gets and reads in the RSS file (sets .rss attribute)
      r.set_image_grid() # Creates the output image spatial grid
      r.set_kernel() # Sets the kernel for every wavelength and exposure
      r.set_flux_rss() # Sets up to use the RSS fluxes (sets .flux, .flux_ivar)
-     r.set_flux_psf(xcen=0.5, ycen=1.5) # Puts fake data into PSF fluxes (sets .flux_psf, .flux_ivar_psf)
+     r.set_flux_psf(xcen=0.5, ycen=1.5) # Puts fake data into PSF fluxes (sets .flux_psf, .flux_psf_ivar)
      r.set_weights() # Sets the weights (sets .weights)
      r.set_cube() # Sets the weights (sets .cube, .cube_ivar)
      r.plot_slice(0)
 
 """
 
-    def set_Amatrix(self, xsample=None, ysample=None, kernel=None, ratio=30):
+    def set_Amatrix(self, xsample=None, ysample=None, waveindex=None, ratio=30):
         """Calculate kernel matrix for linear least square method
 
         Parameters:
@@ -1117,7 +928,7 @@ class ReconstructG(Reconstruct):
         ifit: indices of pixels selected
 
         A : ndarray of np.float32
-            kernel matrix [nExp * nfiber, nfit]
+            kernel matrix [3**addexps * nExp * nfiber, nfit]
 
         Notes:
         -----
@@ -1130,21 +941,27 @@ class ReconstructG(Reconstruct):
         dd = np.zeros((nsample * self.nside * self.nside, 2))
         dd[:, 0] = dx.flatten()
         dd[:, 1] = dy.flatten()
-        if (self.expindex is not None):
-            Afull = interpolate.interpn((self.ykernel, self.xkernel), kernel[0], dd, method='linear',
-                                        bounds_error=False,
-                                        fill_value=0.).reshape(nsample, self.nimage)
-        else:
-            Afull = np.zeros([nsample, self.nside ** 2])
-            for iExp in range(self.nExp):
-                Afull[iExp * self.nfiber:(iExp + 1) * self.nfiber] = interpolate.interpn((self.ykernel, self.xkernel),
-                                                                                         kernel[iExp], dd[
-                                                                                                       iExp * self.nfiber * self.nimage:(
-                                                                                                                                        iExp + 1) * self.nfiber * self.nimage],
-                                                                                         method='linear',
-                                                                                         bounds_error=False,
-                                                                                         fill_value=0.).reshape(
-                    self.nfiber, self.nimage)
+        Afull = np.zeros([nsample, self.nside ** 2])
+        for iExp in range(self.nExp):
+            kernelvalue = self._kernel(self.fwhm[waveindex, iExp]) * self.nkernel ** 2 / self.nside ** 2
+            Afull[iExp * self.nfiber:(iExp + 1) * self.nfiber] = interpolate.interpn((self.ykernel, self.xkernel),
+                                                                                     kernelvalue, dd[
+                                                                                                  iExp * self.nfiber * self.nimage:(
+                                                                                                                                   iExp + 1) * self.nfiber * self.nimage],
+                                                                                     method='linear',
+                                                                                     bounds_error=False,
+                                                                                     fill_value=0.).reshape(self.nfiber,
+                                                                                                            self.nimage)
+
+        if (nsample > self.nExp * self.nfiber):
+            kernelvalue = self._kernel(np.mean(self.fwhm[waveindex])) * self.nkernel ** 2 / self.nside ** 2
+            Afull[self.nExp * self.nfiber:] = interpolate.interpn((self.ykernel, self.xkernel),
+                                                                  kernelvalue,
+                                                                  dd[self.nExp * self.nfiber * self.nimage:],
+                                                                  method='linear',
+                                                                  bounds_error=False,
+                                                                  fill_value=0.).reshape(
+                nsample - self.nExp * self.nfiber, self.nimage)
 
         ineg = np.where(Afull < 0.)
         Afull[ineg] = 0.
@@ -1155,7 +972,7 @@ class ReconstructG(Reconstruct):
         A = Afull[:, ifit]
         return (ifit, A)
 
-    def create_weights(self, xsample=None, ysample=None, ivar=None, kernel=None, lam=1E-4, ratio=30):
+    def create_weights(self, xsample=None, ysample=None, ivar=None, waveindex=None, lam=1E-4, ratio=30):
         """Calculate weights for linear least square method
 
         Parameters:
@@ -1188,7 +1005,7 @@ class ReconstructG(Reconstruct):
 
         This version uses Shepards method.
 """
-        self.ifit, A = self.set_Amatrix(xsample, ysample, kernel, ratio)
+        self.ifit, A = self.set_Amatrix(xsample, ysample, waveindex, ratio)
         self.nfit = len(A[0])
         [U, D, VT] = np.linalg.svd(np.dot(np.diag(np.sqrt(ivar)), A), full_matrices=False)
         Dinv = 1 / D
@@ -1221,7 +1038,39 @@ class ReconstructG(Reconstruct):
         return output
 
 
-def set_G(plate=None, ifu=None, release=None, waveindex=None, expindex=None):
+def set_base(plate=None, ifu=None, release='MPL-5', waveindex=None, addexps=None, dimage = 0.75,dkernel = 0.05):
+    """ set the grid and fiber fluxes
+
+        Parameters:
+        ----------
+
+        plate : int, np.int32
+            plate number
+
+        ifu : int, np.int32
+            IFU number
+
+        release : str
+            data release (default 'MPL-5')
+
+        waveindex : int, np.int32
+            indices of wavelengths to reconstruct (default None)
+
+        Return:
+        --------
+        base: object that includes information of grid and fiber fluxes
+
+"""
+    base = Reconstruct(plate=plate, ifu=ifu, release=release, waveindex=waveindex, addexps=addexps)
+    base.set_rss()
+    base.set_image_grid(dimage = dimage)
+    base.set_kernel(dkernel=dkernel)
+    base.set_flux_rss()
+    base.set_flux_psf()
+    return base
+
+
+def set_G(plate=None, ifu=None, release='MPL-5', waveindex=None, addexps=None,dimage = 0.75,dkernel = 0.05):
     """ Linear least square method for the reconstruction
 
         Parameters:
@@ -1239,18 +1088,15 @@ def set_G(plate=None, ifu=None, release=None, waveindex=None, expindex=None):
         waveindex : int, np.int32
             indices of wavelengths to reconstruct (default None)
 
-        expindex : int, np.int32
-            indices of exposures to use (default None)
-
         Return:
         --------
         base: object that includes information of grid and fiber fluxes
 
 """
-    base = ReconstructG(plate=plate, ifu=ifu, release='MPL-5', waveindex=waveindex, expindex=expindex)
+    base = ReconstructG(plate=plate, ifu=ifu, release=release, waveindex=waveindex, addexps=addexps)
     base.set_rss()
-    base.set_image_grid()
-    base.set_kernel()
+    base.set_image_grid(dimage = dimage)
+    base.set_kernel(dkernel=dkernel)
     base.set_flux_rss()
     base.set_flux_psf()
     start_time = time.time()
@@ -1263,7 +1109,7 @@ def set_G(plate=None, ifu=None, release=None, waveindex=None, expindex=None):
     return base
 
 
-def set_Shepard(plate=None, ifu=None, release=None, waveindex=None, expindex=None):
+def set_Shepard(plate=None, ifu=None, release='MPL-5', waveindex=None, addexps=None,dimage = 0.75,dkernel = 0.05):
     """ Shepard's method for the reconstruction
 
         Parameters:
@@ -1281,18 +1127,15 @@ def set_Shepard(plate=None, ifu=None, release=None, waveindex=None, expindex=Non
         waveindex : int, np.int32
             indices of wavelengths to reconstruct (default None)
 
-        expindex : int, np.int32
-            indices of exposures to use (default None)
-
         Return:
         --------
         base: object that includes information of grid and fiber fluxes
 
 """
-    base = ReconstructShepard(plate=plate, ifu=ifu, release='MPL-5', waveindex=waveindex, expindex=expindex)
+    base = ReconstructShepard(plate=plate, ifu=ifu, release=release, waveindex=waveindex, addexps=addexps)
     base.set_rss()
-    base.set_image_grid()
-    base.set_kernel()
+    base.set_image_grid(dimage = dimage)
+    base.set_kernel(dkernel=dkernel)
     base.set_flux_rss()
     base.set_flux_psf()
     start_time = time.time()
