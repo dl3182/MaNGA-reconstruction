@@ -256,7 +256,9 @@ class Reconstruct(object):
         self.dkernel = dkernel
         (self.nkernel, length, self.x2k, self.y2k, self.xkernel, self.ykernel) = self._create_grid(self.dkernel)
 
-        kernelfile = fits.open('../data/kernel_database.fits')
+        filename = os.path.join(os.getenv('RECONSTRUCTION_DIR'),
+                                'python', 'data', 'kernel_database.fits')
+        kernelfile = fits.open(filename)
         self.kernelbase = kernelfile[0].data
         kernelfile.close()
         self.nkernelbase = self.kernelbase.shape[1]
@@ -692,7 +694,9 @@ class Reconstruct(object):
         PSF_ave : ndarray of np.float32 [nside,nside]
             the average of cube for given band
 """
-        band0 = np.loadtxt('../data/' + color + '_filter.dat')
+        filterfile = os.path.join(os.getenv('RECONSTRUCTION_DIR'),
+                                  'python', 'data', color + '_filter.dat')
+        band0 = np.loadtxt(filterfile)
         band1 = np.arange(3400, band0[0, 0], 25)
         band2 = np.arange(band0[-1, 0], 11000, 25)
         weight1 = np.zeros(band1.shape)
