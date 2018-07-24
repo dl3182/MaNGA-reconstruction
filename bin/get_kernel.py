@@ -1,14 +1,12 @@
 #!/usr/bin/env python
 
-import os,sys
-
-path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-
+import os
+import sys
 import numpy as np
 from scipy import signal as sign
 from astropy.io import fits
-import os
+
+path = os.getenv('RECONSTRUCTION_DIR')
 
 
 class kernel(object):
@@ -68,11 +66,12 @@ class kernel(object):
         hdr = fits.Header()
         hdr['LENGTH'] = (self.length, 'Length of kernel grid(arcsec)')
         hdr['DKERNEL'] = (self.dkernel, 'spacing of kernel grid(pixel/arcsec)')
-        hdu = fits.PrimaryHDU(self.kernelvalue)
+        hdu = fits.PrimaryHDU(data=self.kernelvalue, header=hdr)
         hdul = fits.HDUList([hdu])
-        hdul.writeto(path+'/python/data/'+'kernel_database.fits')
+        dbfile = os.path.join(path, 'python', 'data', 'kernel_database.fits')
+        hdul.writeto(dbfile)
 
 if __name__ == "__main__":
-    ker = kernel(length = 8,dkernel=0.05)
+    ker = kernel(length=8, dkernel=0.05)
     ker.set_kernel()
     ker.create_set()
