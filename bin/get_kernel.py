@@ -61,7 +61,7 @@ class kernel(object):
     def create_set(self):
         dbfile = os.path.join(path, 'python', 'data', 'kernel_database.fits')
         try:
-            os.remove('kernel_database.fits')
+            os.remove(dbfile)
         except OSError:
             pass
         hdr = fits.Header()
