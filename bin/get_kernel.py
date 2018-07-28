@@ -59,6 +59,7 @@ class kernel(object):
         return
 
     def create_set(self):
+        dbfile = os.path.join(path, 'python', 'data', 'kernel_database.fits')
         try:
             os.remove('kernel_database.fits')
         except OSError:
@@ -68,7 +69,6 @@ class kernel(object):
         hdr['DKERNEL'] = (self.dkernel, 'spacing of kernel grid(pixel/arcsec)')
         hdu = fits.PrimaryHDU(data=self.kernelvalue, header=hdr)
         hdul = fits.HDUList([hdu])
-        dbfile = os.path.join(path, 'python', 'data', 'kernel_database.fits')
         hdul.writeto(dbfile)
 
 if __name__ == "__main__":
