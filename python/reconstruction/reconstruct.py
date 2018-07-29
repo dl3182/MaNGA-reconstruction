@@ -1108,7 +1108,7 @@ def set_G(plate=None, ifu=None, release='MPL-5', waveindex=None, addexps=None,di
     base.set_cube()
     stop_time = time.time()
     print("calculation time = %.2f" % (stop_time - start_time))
-    if (len(base.wave) == base.flux.shape[1]):
+    if (len(base.wave) == base.rss.data['FLUX'].data.shape[1]):
         base.set_band()
     return base
 
@@ -1147,6 +1147,6 @@ def set_Shepard(plate=None, ifu=None, release='MPL-5', waveindex=None, addexps=N
     base.set_cube()
     stop_time = time.time()
     print("calculation time = %.2f" % (stop_time - start_time))
-    if (len(base.wave) == base.flux.shape[1]):
+    if (len(base.wave) == base.rss.data['FLUX'].data.shape[1]):
         base.set_band()
     return base
