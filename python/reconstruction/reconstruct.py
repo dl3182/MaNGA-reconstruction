@@ -165,6 +165,8 @@ class Reconstruct(object):
         if (self.waveindex is not None):
             self.nWave = len(self.waveindex)
             self.wave = self.wave[self.waveindex]
+            self.xpos = self.xpos[:,self.waveindex]
+            self.ypos = self.ypos[:,self.waveindex]
 
         # Set FWHM values as a function of wavelength
         self.obsinfo = self.rss.data['OBSINFO'].data
