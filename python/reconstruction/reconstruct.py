@@ -335,7 +335,7 @@ class Reconstruct(object):
                 dd = np.zeros((len(xsample), 2))
                 dd[:, 0] = dx.flatten()
                 dd[:, 1] = dy.flatten()
-                kernelvalue = self._kernel(self.fwhm[iWave, iExp]) * self.nkernel ** 2 / self.nside ** 2
+                kernelvalue = self._kernel(self.fwhm[iWave, iExp]) * (self.dimage / self.dkernel)**2
                 self.flux_psf[iExp * self.nfiber:(iExp + 1) * self.nfiber, iWave] = interpolate.interpn(
                     (self.xkernel, self.ykernel), kernelvalue, dd, method='linear',
                     bounds_error=False, fill_value=0.)
@@ -348,7 +348,7 @@ class Reconstruct(object):
                 dd = np.zeros((len(xsample), 2))
                 dd[:, 0] = dx.flatten()
                 dd[:, 1] = dy.flatten()
-                kernelvalue = self._kernel(np.mean(self.fwhm[iWave, :])) * self.nkernel ** 2 / self.nside ** 2
+                kernelvalue = self._kernel(np.mean(self.fwhm[iWave, :])) * (self.dimage / self.dkernel)**2
                 self.flux_psf[self.nExp * self.nfiber:, iWave] = interpolate.interpn((self.xkernel, self.ykernel),
                                                                                      kernelvalue, dd, method='linear',
                                                                                      bounds_error=False, fill_value=0.)
@@ -949,7 +949,7 @@ class ReconstructG(Reconstruct):
         dd[:, 1] = dy.flatten()
         Afull = np.zeros([nsample, self.nside ** 2])
         for iExp in range(self.nExp):
-            kernelvalue = self._kernel(self.fwhm[waveindex, iExp]) * self.nkernel ** 2 / self.nside ** 2
+            kernelvalue = self._kernel(self.fwhm[waveindex, iExp]) * (self.dimage / self.dkernel)**2
             Afull[iExp * self.nfiber:(iExp + 1) * self.nfiber] = interpolate.interpn((self.ykernel, self.xkernel),
                                                                                      kernelvalue, dd[
                                                                                                   iExp * self.nfiber * self.nimage:(
@@ -960,7 +960,7 @@ class ReconstructG(Reconstruct):
                                                                                                             self.nimage)
 
         if (nsample > self.nExp * self.nfiber):
-            kernelvalue = self._kernel(np.mean(self.fwhm[waveindex])) * self.nkernel ** 2 / self.nside ** 2
+            kernelvalue = self._kernel(np.mean(self.fwhm[waveindex])) * (self.dimage / self.dkernel)**2
             Afull[self.nExp * self.nfiber:] = interpolate.interpn((self.ykernel, self.xkernel),
                                                                   kernelvalue,
                                                                   dd[self.nExp * self.nfiber * self.nimage:],
@@ -978,7 +978,7 @@ class ReconstructG(Reconstruct):
         A = Afull[:, ifit]
         return (ifit, A)
 
-    def create_weights(self, xsample=None, ysample=None, ivar=None, waveindex=None, lam=1E-4, ratio=30):
+    def create_weights(self, xsample=None, ysample=None, ivar=None, waveindex=None, lam=0, ratio=30):
         """Calculate weights for linear least square method
 
         Parameters:
@@ -1016,12 +1016,21 @@ class ReconstructG(Reconstruct):
         [U, D, VT] = np.linalg.svd(np.dot(np.diag(np.sqrt(ivar)), A), full_matrices=False)
         Dinv = 1 / D
 
-        Q = (np.dot(np.dot(VT.transpose(), np.diag(D)), VT))
+        self.lam = lam
+        for i in range(len(D)):
+            if D[i]<1E-6:
+                Dinv[i]=0
+        filt=D**2/(D**2+self.lam**2)
+
+        A_plus = np.dot(np.dot(VT.T, np.dot(np.diag(filt),np.diag(Dinv))), U.T)
+        
+        Q = (np.dot(np.dot(VT.transpose(), np.dot(np.diag(1/filt),np.diag(D))), VT))
         sl = Q.sum(axis=1)
         Rl = (Q.T / sl.T).T
-
-        A_plus = np.dot(np.dot(VT.T, np.diag(Dinv)), U.T)
-        T = np.dot(np.dot(Rl, A_plus), np.diag(np.sqrt(ivar)))
+        
+        
+        T = np.dot(np.dot(Rl, A_plus),np.diag(np.sqrt(ivar)))
+        self.A_plus = self.set_reshape(np.dot(A_plus,np.diag(np.sqrt(ivar))))
         wwT = self.set_reshape(T)
         return wwT
 
@@ -1076,7 +1085,7 @@ def set_base(plate=None, ifu=None, release='MPL-5', waveindex=None, addexps=None
     return base
 
 
-def set_G(plate=None, ifu=None, release='MPL-5', waveindex=None, addexps=None,dimage = 0.75,dkernel = 0.05):
+def set_G(plate=None, ifu=None, release='MPL-5', waveindex=None, addexps=None,dimage = 0.75,dkernel = 0.05,lam=0):
     """ Linear least square method for the reconstruction
 
         Parameters:
@@ -1106,7 +1115,7 @@ def set_G(plate=None, ifu=None, release='MPL-5', waveindex=None, addexps=None,di
     base.set_flux_rss()
     base.set_flux_psf()
     start_time = time.time()
-    base.set_weights()
+    base.set_weights(lam=lam)
     base.set_cube()
     stop_time = time.time()
     print("calculation time = %.2f" % (stop_time - start_time))
