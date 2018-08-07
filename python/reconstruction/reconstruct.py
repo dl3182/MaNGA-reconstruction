@@ -712,6 +712,8 @@ class Reconstruct(object):
         nWave = len(wave)
         PSF_ave = (np.matlib.repmat(band_value, n ** 2, 1) * (PSF.reshape(n ** 2, nWave))).reshape(n, n, nWave).sum(
             axis=2) / band_value.sum()
+        where_are_NaNs = np.isnan(PSF_ave)
+        PSF_ave[where_are_NaNs]=0
         return PSF_ave
 
 
