@@ -290,7 +290,7 @@ class Reconstruct(object):
         kernelvalue[index_m:index_p, index_m:index_p] = kernel.copy()
         return kernelvalue
 
-    def set_flux_psf(self, xcen=0., ycen=0.):
+    def set_flux_psf(self, xcen=0., ycen=0.,alpha=1,noise=None):
         """Set the fiber fluxes to a PSF corresponding to the kernel
 
         Parameters:
@@ -326,32 +326,55 @@ class Reconstruct(object):
         self.flux_psf_ivar = np.ones([self.xpos.shape[0], self.nWave],
                                      dtype=np.float32)
         start_time = time.time()
+        imagevalue=[]
         for iWave in np.arange(self.nWave):
             for iExp in np.arange(self.nExp):
-                xsample = self.xpos[iExp * self.nfiber:(iExp + 1) * self.nfiber, iWave]
-                ysample = self.ypos[iExp * self.nfiber:(iExp + 1) * self.nfiber, iWave]
-                dx = xsample - xcen
-                dy = ysample - ycen
+                xsample = self.xpos[iExp*self.nfiber:(iExp+1)*self.nfiber,iWave]
+                ysample = self.ypos[iExp*self.nfiber:(iExp+1)*self.nfiber,iWave]
+                dx = xsample
+                dy = ysample
                 dd = np.zeros((len(xsample), 2))
                 dd[:, 0] = dx.flatten()
                 dd[:, 1] = dy.flatten()
-                kernelvalue = self._kernel(self.fwhm[iWave, iExp]) * (self.dimage / self.dkernel)**2
-                self.flux_psf[iExp * self.nfiber:(iExp + 1) * self.nfiber, iWave] = interpolate.interpn(
-                    (self.xkernel, self.ykernel), kernelvalue, dd, method='linear',
-                    bounds_error=False, fill_value=0.)
-            if (self.xpos.shape[0] > (self.nExp * self.nfiber)):
+                kernelvalue0 = self._kernel(self.fwhm[iWave,iExp]*alpha)* (self.dimage / self.dkernel)**2
+                self.kernelvalue = kernelvalue0
+                
+                if (xcen!=0) or (ycen!=0):
+                    indx = np.where((np.round(self.xkernel,4)-xcen)<=0)[0][-1]
+                    indy = np.where((np.round(self.ykernel,4)-ycen)<=0)[0][-1]
+                    kernelvalue=np.zeros([self.nkernel,self.nkernel])
+                    ncen = int((self.nkernel-1)/2)
+                    for i in range(np.maximum(ncen-indx,0),np.minimum(self.nkernel+ncen-indx,self.nkernel)):
+                        for j in range(np.maximum(ncen-indy,0),np.minimum(self.nkernel+ncen-indy,self.nkernel)):
+                            kernelvalue[i+indx-ncen,j+indy-ncen]=kernelvalue0[i,j]
+                else:
+                    kernelvalue = kernelvalue0.copy()
+                    
+                imagevalue.append(kernelvalue)
+                
+                self.flux_psf[iExp*self.nfiber:(iExp+1)*self.nfiber,iWave] = interpolate.interpn((self.xkernel, self.ykernel),kernelvalue, dd, method='linear',
+                                            bounds_error=False, fill_value=0.)
+            if (self.xpos.shape[0]>(self.nExp*self.nfiber)):
                 # If adding additional exposures, using average kernel to estimate
-                xsample = self.xpos[self.nExp * self.nfiber:, iWave]
-                ysample = self.ypos[self.nExp * self.nfiber:, iWave]
+                xsample = self.xpos[self.nExp*self.nfiber:,iWave]
+                ysample = self.ypos[self.nExp*self.nfiber:,iWave]
                 dx = xsample - xcen
                 dy = ysample - ycen
                 dd = np.zeros((len(xsample), 2))
                 dd[:, 0] = dx.flatten()
                 dd[:, 1] = dy.flatten()
-                kernelvalue = self._kernel(np.mean(self.fwhm[iWave, :])) * (self.dimage / self.dkernel)**2
-                self.flux_psf[self.nExp * self.nfiber:, iWave] = interpolate.interpn((self.xkernel, self.ykernel),
-                                                                                     kernelvalue, dd, method='linear',
-                                                                                     bounds_error=False, fill_value=0.)
+                self.flux_psf[self.nExp*self.nfiber:,iWave] = interpolate.interpn((self.xkernel, self.ykernel),kernelvalue, dd, method='linear',
+                                            bounds_error=False, fill_value=0.)
+        self.imagevalue=np.array(imagevalue).reshape(self.nExp,self.nWave,self.nkernel,self.nkernel)
+        
+        if noise is not None:
+            self.flux_psf0 = self.flux_psf.copy() 
+            pnoise = np.zeros(self.flux_psf.shape)
+            for i in range(len(pnoise)):
+                pnoise[i] = (np.random.poisson(self.flux_psf[i] + 100, 1) - 100)
+            pnoise = pnoise/pnoise.max()*self.flux_psf.max()/noise
+            self.flux_psf = pnoise +self.flux_psf
+        
         stop_time = time.time()
         print("fiber flux time = %.2f" % (stop_time - start_time))
 
@@ -632,7 +655,7 @@ class Reconstruct(object):
         err = ks - self.gaussian(rs, pars)
         return err
 
-    def FWHM(self, xi=None, yi=None, PSF=None, xpsf=0, ypsf=0):
+    def FWHM(self, xi=None, yi=None, PSF=None, xcen=0, ycen=0):
         """ calculate FWHM for given image
 
         Parameters:
@@ -658,9 +681,9 @@ class Reconstruct(object):
         This version uses gaussian function to fit the image
 """
         rng = 3.
-        xs = xpsf + 2. * rng * (np.random.random(size=1000) - 0.5)
-        ys = ypsf + 2. * rng * (np.random.random(size=1000) - 0.5)
-        rs = np.sqrt((xs - xpsf) ** 2 + (ys - ypsf) ** 2)
+        xs = xcen + 2. * rng * (np.random.random(size=1000) - 0.5)
+        ys = ycen + 2. * rng * (np.random.random(size=1000) - 0.5)
+        rs = np.sqrt((xs - xcen) ** 2 + (ys - ycen) ** 2)
         dx = xs
         dy = ys
         dd = np.zeros((len(xs), 2))
@@ -911,7 +934,7 @@ class ReconstructG(Reconstruct):
 
 """
 
-    def set_Amatrix(self, xsample=None, ysample=None, waveindex=None, ratio=30):
+    def set_Amatrix(self, xsample=None, ysample=None, waveindex=None, ratio=30,beta=1):
         """Calculate kernel matrix for linear least square method
 
         Parameters:
@@ -951,7 +974,7 @@ class ReconstructG(Reconstruct):
         dd[:, 1] = dy.flatten()
         Afull = np.zeros([nsample, self.nside ** 2])
         for iExp in range(self.nExp):
-            kernelvalue = self._kernel(self.fwhm[waveindex, iExp]) * (self.dimage / self.dkernel)**2
+            kernelvalue = self._kernel(self.fwhm[waveindex, iExp]*beta) * (self.dimage / self.dkernel)**2
             Afull[iExp * self.nfiber:(iExp + 1) * self.nfiber] = interpolate.interpn((self.ykernel, self.xkernel),
                                                                                      kernelvalue, dd[
                                                                                                   iExp * self.nfiber * self.nimage:(
@@ -980,7 +1003,7 @@ class ReconstructG(Reconstruct):
         A = Afull[:, ifit]
         return (ifit, A)
 
-    def create_weights(self, xsample=None, ysample=None, ivar=None, waveindex=None, lam=0, ratio=30):
+    def create_weights(self, xsample=None, ysample=None, ivar=None, waveindex=None, lam=0, ratio=30,beta=1):
         """Calculate weights for linear least square method
 
         Parameters:
@@ -1013,7 +1036,7 @@ class ReconstructG(Reconstruct):
 
         This version uses Shepards method.
 """
-        self.ifit, A = self.set_Amatrix(xsample, ysample, waveindex, ratio)
+        self.ifit, A = self.set_Amatrix(xsample, ysample, waveindex, ratio, beta)
         self.nfit = len(A[0])
         [U, D, VT] = np.linalg.svd(np.dot(np.diag(np.sqrt(ivar)), A), full_matrices=False)
         Dinv = 1 / D
@@ -1087,7 +1110,7 @@ def set_base(plate=None, ifu=None, release='MPL-5', waveindex=None, addexps=None
     return base
 
 
-def set_G(plate=None, ifu=None, release='MPL-5', waveindex=None, addexps=None,dimage = 0.75,dkernel = 0.05,lam=0):
+def set_G(plate=None, ifu=None, release='MPL-5', waveindex=None, addexps=None,dimage = 0.75,dkernel = 0.05,lam=0,alpha=1,beta=1,xcen=None,ycen=None,noise=None):
     """ Linear least square method for the reconstruction
 
         Parameters:
@@ -1115,9 +1138,9 @@ def set_G(plate=None, ifu=None, release='MPL-5', waveindex=None, addexps=None,di
     base.set_image_grid(dimage = dimage)
     base.set_kernel(dkernel=dkernel)
     base.set_flux_rss()
-    base.set_flux_psf()
+    base.set_flux_psf(alpha=alpha,xcen=xcen,ycen=ycen,noise=noise)
     start_time = time.time()
-    base.set_weights(lam=lam)
+    base.set_weights(beta=beta,lam=lam)
     base.set_cube()
     stop_time = time.time()
     print("calculation time = %.2f" % (stop_time - start_time))
@@ -1126,7 +1149,7 @@ def set_G(plate=None, ifu=None, release='MPL-5', waveindex=None, addexps=None,di
     return base
 
 
-def set_Shepard(plate=None, ifu=None, release='MPL-5', waveindex=None, addexps=None,dimage = 0.75,dkernel = 0.05):
+def set_Shepard(plate=None, ifu=None, release='MPL-5', waveindex=None, addexps=None,dimage = 0.75,dkernel = 0.05,alpha=1,beta=1,xcen=None,ycen=None,noise=None):
     """ Shepard's method for the reconstruction
 
         Parameters:
@@ -1154,7 +1177,7 @@ def set_Shepard(plate=None, ifu=None, release='MPL-5', waveindex=None, addexps=N
     base.set_image_grid(dimage = dimage)
     base.set_kernel(dkernel=dkernel)
     base.set_flux_rss()
-    base.set_flux_psf()
+    base.set_flux_psf(alpha=alpha,xcen=xcen,ycen=ycen,noise=noise)
     start_time = time.time()
     base.set_weights()
     base.set_cube()
