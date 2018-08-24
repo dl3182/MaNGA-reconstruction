@@ -1,10 +1,7 @@
 import math
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.colors as colors
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 import matplotlib.cm as cm
-from scipy import signal as sign
 import scipy.interpolate as interpolate
 import marvin.tools.rss as rss
 from marvin import config
