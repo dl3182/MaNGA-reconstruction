@@ -373,13 +373,10 @@ class Reconstruct(object):
         if (self.nWave <= 5):
             self.imagevalue = np.array(imagevalue).reshape(3 ** self.addexps * self.nExp, self.nWave, self.nkernel,
                                                            self.nkernel)
-
-        if (noise != 0):
-            pnoise = np.zeros(self.flux_psf.shape)
-            for i in range(len(pnoise)):
-                pnoise[i] = (np.random.poisson(self.flux_psf[i] + 100, 1) - 100)
-            pnoise = pnoise / pnoise.max() * self.flux_psf.max() / noise
-            self.flux_psf = pnoise + self.flux_psf
+        if (noise!=0):
+            self.flux_psf0=self.flux_psf.copy()
+            for i in range(len(self.flux_psf)):
+                self.flux_psf[i]=np.random.poisson(self.flux_psf[i]*10**noise)/10**noise
 
         # stop_time = time.time()
 
