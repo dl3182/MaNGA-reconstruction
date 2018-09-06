@@ -556,7 +556,7 @@ class Reconstruct(object):
         for iWave in np.arange(self.nWave):
             fcube = ((weights[iWave].dot(flux[:, iWave])).reshape(self.nside,
                                                                   self.nside) *
-                     self.conversion).T
+                     self.conversion)
             cube[:, :, iWave] = fcube
             covar = self.covar(iWave, flux_ivar, weights[iWave])
             var = np.diagonal(covar)
@@ -684,8 +684,8 @@ class Reconstruct(object):
         dx = xs
         dy = ys
         dd = np.zeros((len(xs), 2))
-        dd[:, 0] = dx.flatten()
-        dd[:, 1] = dy.flatten()
+        dd[:, 0] = dy.flatten()
+        dd[:, 1] = dx.flatten()
         ks = interpolate.interpn((yi, xi), PSF, dd, method='linear', bounds_error=False, fill_value=0.)
 
         pars = [1, 2]
