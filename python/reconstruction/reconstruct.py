@@ -402,38 +402,7 @@ class Reconstruct(object):
             self.flux = self.flux[:, self.waveindex]
             self.flux_ivar = self.flux_ivar[:, self.waveindex]
 
-    def set_weights(self, **kwargs):
-        """Set weights for fibers
-
-        Notes:
-        -----
-
-        Uses the create_weights() method for the object. Loops over
-        wavelength and stores the weights.
-
-        Sets attributes:
-        .weights - an ndarray of np.float32, [nWave, nside * nside, nExp * nfiber]
-        .weights_psf - an ndarray of np.float32, [nWave, nside * nside, 3**addexps * nExp * nfiber]
-
-"""
-        self.weights = np.zeros([self.nWave, self.nside * self.nside,
-                                 self.nExp * self.nfiber])
-        self.weights_psf = np.zeros([self.nWave, self.nside * self.nside,
-                                     self.xpos.shape[0]])
-        for iWave in np.arange(self.nWave):
-            wwT = self.create_weights(xsample=self.xpos[0:self.nExp * self.nfiber, iWave],
-                                      ysample=self.ypos[0:self.nExp * self.nfiber, iWave],
-                                      ivar=self.flux_ivar[:, iWave],
-                                      waveindex=iWave,
-                                      **kwargs)
-            self.weights[iWave, :, :] = wwT
-            wwT = self.create_weights(xsample=self.xpos[:, iWave],
-                                      ysample=self.ypos[:, iWave],
-                                      ivar=self.flux_psf_ivar[:, iWave], waveindex=iWave,
-                                      **kwargs)
-            self.weights_psf[iWave, :, :] = wwT
-
-    def create_weights(self, xsample=None, ysample=None, ivar=None, waveindex=None):
+     def create_weights(self, xsample=None, ysample=None, ivar=None,waveindex =None):
         """Calculate weights for nearest fiber
 
         Parameters:
@@ -465,12 +434,12 @@ class Reconstruct(object):
             for j in np.arange(self.nside):
                 dx = xsample - self.x2i[i, j]
                 dy = ysample - self.y2i[i, j]
-                r = np.sqrt(dx ** 2 + dy ** 2)
+                r = np.sqrt(dx**2 + dy**2)
                 iclosest = r[iok].argmin()
                 w[iclosest, i * self.nside + j] = 1.
         wwT = self.normalize_weights(w)
-        return (wwT)
-
+        return(wwT)
+    
     def normalize_weights(self, w):
         """Normalize weights
 
@@ -501,14 +470,14 @@ class Reconstruct(object):
             else:
                 ww[:, i] = w[:, i] / wsum[i]
         wwT = ww.T
-        return (wwT)
-
-    def set_cube(self):
+        return(wwT)
+        
+    def set_cube(self,**kwargs):
         """Set cube for each wavelength
-
+        
         Notes:
         -----
-
+        
         Sets the attributes:
 
           .cube - cube of RSS as ndarray of np.float32
@@ -518,53 +487,58 @@ class Reconstruct(object):
           .cube_psf - cube of simulation as ndarray of np.float32
                   [nside, nside, nWave]
           .cube_ivar - inverse variance of cube of simulation as ndarray of np.float32
-                       [nside, nside, nWave]
+                       [nside, nside, nWave]             
 """
-        self.cube_psf, self.cube_psf_ivar = self.calculate_cube(self.flux_psf, self.flux_psf_ivar, self.weights_psf)
-        self.cube, self.cube_ivar = self.calculate_cube(self.flux, self.flux_ivar, self.weights)
+        self.cube_psf,self.cube_psf_ivar =self.calculate_cube(self.flux_psf,self.flux_psf_ivar,**kwargs)
+        self.cube,self.cube_ivar = self.calculate_cube(self.flux,self.flux_ivar,**kwargs)
         return
 
-    def calculate_cube(self, flux, flux_ivar, weights):
+    def calculate_cube(self, flux, flux_ivar,**kwargs):
         """calculate cube and cube inverse variance for given flux
 
-        Parameters:
+        Parameters: 
         ----------
-
+        
         flux: ndarray of np.float32
             flux of each fiber [nExp * nfiber]
-
+            
         flux_ivar: ndarray of np.float32
             flux inverse variance of each fiber [nExp * nfiber]
 
         Return:
         ------
-
+        
         cube : ndarray of np.float32 [nside, nside, nWave]
             reconstruction result
         cube_ivar : ndarray of np.float32 [nside, nside, nWave]
-            inverse variance of reconstruction result
-
-
+            inverse variance of reconstruction result 
+                
+        
 """
         cube = np.zeros([self.nside, self.nside, self.nWave],
-                        dtype=np.float32)
-        cube_ivar = np.zeros([self.nside, self.nside, self.nWave],
                              dtype=np.float32)
+        cube_ivar = np.zeros([self.nside, self.nside, self.nWave],
+                                  dtype=np.float32)
         for iWave in np.arange(self.nWave):
-            fcube = ((weights[iWave].dot(flux[:, iWave])).reshape(self.nside,
-                                                                  self.nside) *
+            weights=self.create_weights(xsample=self.xpos[0:self.nExp*self.nfiber, iWave],
+                                      ysample=self.ypos[0:self.nExp*self.nfiber, iWave],
+                                      ivar=flux_ivar[:, iWave],
+                                      waveindex = iWave,**kwargs)
+            fcube = ((weights.dot(flux[:, iWave])).reshape(self.nside,
+                                                            self.nside) *
                      self.conversion)
             cube[:, :, iWave] = fcube
-            covar = self.covar(iWave, flux_ivar, weights[iWave])
+            covar = self.covar(iWave,flux_ivar,weights)
             var = np.diagonal(covar)
             igt0 = np.where(var > 0)[0]
             ivar = np.zeros(self.nside * self.nside, dtype=np.float32)
             ivar[igt0] = 1. / var[igt0]
             cube_ivar[:, :, iWave] = ivar.reshape([self.nside,
-                                                   self.nside])
-        return (cube, cube_ivar)
-
-    def covar(self, iWave=None, flux_ivar=None, weights=None):
+                                                        self.nside])
+        return (cube,cube_ivar)
+            
+            
+    def covar(self, iWave=None,flux_ivar=None,weights=None):
         """Return cube covariance matrix for a wavelength
 
         Parameters:
@@ -581,29 +555,29 @@ class Reconstruct(object):
         iok = np.where(flux_ivar[:, iWave] > 0)[0]
         wwT = (weights[:, :])[:, iok]
         covar = wwT.dot(np.diag(flux_ivar[iok, iWave])).dot(wwT.T)
-        return (covar)
-
-    def plot_slice(self, iWave=0, keyword=None, vmax=None, vmin=0.):
+        return(covar)
+    
+    def plot_slice(self, iWave=0, keyword=None,vmax=None, vmin=0.):
         """Plot a slice of the cube"""
-        if keyword == 'simulation':
-            target = self.cube_psf[:, :, iWave]
+        if keyword=='simulation':
+            target=self.cube_psf[:, :, iWave]
         else:
-            target = self.cube[:, :, iWave]
+            target=self.cube[:, :, iWave]
         map = target
-        if (vmax is None):
+        if(vmax is None):
             vmax = map.max() * 1.02
         extent = (self.xmin, self.xmax, self.ymin, self.ymax)
         plt.figure(figsize=(6.5, 5.))
-        font = {'family': 'sans-serif',
-                'size': 15}
+        font = {'family' : 'sans-serif',
+                'size'   : 15}
         plt.rc('font', **font)
         plt.imshow(target, extent=extent, vmin=vmin,
                    vmax=vmax, cmap=cm.gray_r, origin='lower')
         plt.xlabel('X (arcsec)')
         plt.ylabel('Y (arcsec)')
-        plt.title('reconstruction of ' + keyword + ' slice')
+        plt.title('reconstruction of '+ keyword +' slice')
         plt.colorbar(label='flux')
-
+        
     def set_band(self):
         """ set average result for each band simulation and RSS and its FWHM
 
