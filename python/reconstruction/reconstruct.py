@@ -402,7 +402,7 @@ class Reconstruct(object):
             self.flux = self.flux[:, self.waveindex]
             self.flux_ivar = self.flux_ivar[:, self.waveindex]
 
-     def create_weights(self, xsample=None, ysample=None, ivar=None,waveindex =None):
+    def create_weights(self, xsample=None, ysample=None, ivar=None,waveindex =None):
         """Calculate weights for nearest fiber
 
         Parameters:
@@ -1111,8 +1111,7 @@ def set_G(plate=None, ifu=None, release='MPL-5', waveindex=None, addexps=None,di
     base.set_flux_rss()
     base.set_flux_psf(alpha=alpha,xcen=xcen,ycen=ycen,noise=noise)
     start_time = time.time()
-    base.set_weights(beta=beta,lam=lam)
-    base.set_cube()
+    base.set_cube((beta=beta,lam=lam)
     stop_time = time.time()
     print("calculation time = %.2f" % (stop_time - start_time))
     if (len(base.wave) == base.rss.data['FLUX'].data.shape[1]):
@@ -1150,7 +1149,6 @@ def set_Shepard(plate=None, ifu=None, release='MPL-5', waveindex=None, addexps=N
     base.set_flux_rss()
     base.set_flux_psf(alpha=alpha,xcen=xcen,ycen=ycen,noise=noise)
     start_time = time.time()
-    base.set_weights()
     base.set_cube()
     stop_time = time.time()
     print("calculation time = %.2f" % (stop_time - start_time))
