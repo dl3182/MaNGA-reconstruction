@@ -942,21 +942,25 @@ class ReconstructG(Reconstruct):
         dy = np.outer(ysample, np.ones(self.nimage)) - np.outer(np.ones(nsample), self.y2i.flatten())
         dr = np.sqrt(dx ** 2 + dy ** 2).flatten()
         dfwhm = (np.matlib.repmat(self.fwhm[waveindex], self.nfiber * self.nimage, 1).flatten('F'))
-        dd = np.zeros((len(dr), 2))
-        dd[:, 0] = dfwhm.flatten()
-        dd[:, 1] = dr.flatten()
+        
+        radius_lim=5.5
+        indices=np.where(dr.flatten()<radius_lim)[0]
 
-        ifwhm = np.arange(0.5, 2.5, 0.01)
-        fwhmmin = int(self.fwhm.min() * 100) - 50
-        fwhmmax = int(self.fwhm.max() * 100) - 50
-        ifwhm = ifwhm[max(fwhmmin - 3, 0):min(fwhmmax + 3, 200)]
-
-        ir = np.arange(0, 5.5, 0.05)
-
-        Afull = interpolate.interpn((ifwhm, ir), self.kernel_radial[max(fwhmmin - 3, 0):min(fwhmmax + 3, 200), :], dd,
-                                    method='linear', bounds_error=False, fill_value=0.) * (
-                                                                                          self.dimage / self.dkernel) ** 2
-        Afull = Afull.reshape(self.nExp * self.nfiber, self.nimage)
+        dd = np.zeros([len(indices), 2])
+        dd[:, 0] = dfwhm.flatten()[indices]
+        dd[:, 1] = dr.flatten()[indices]
+        
+        ifwhm=np.arange(0.5,2.5,0.01)
+        fwhmmin=int(self.fwhm.min()*100)-50
+        fwhmmax=int(self.fwhm.max()*100)-50
+        ifwhm=ifwhm[max(fwhmmin-3,0):min(fwhmmax+3,200)]
+        
+        ir=np.arange(0,radius_lim,0.05)
+        
+        Afull= interpolate.interpn((ifwhm, ir),self.kernel_radial[max(fwhmmin-3,0):min(fwhmmax+3,200),:], dd,method='linear',bounds_error=False,fill_value=0.)* (self.dimage / self.dkernel)**2
+        Afull2 = np.zeros(len(dr.flatten()))
+        Afull2[indices]=Afull
+        Afull= Afull2.reshape(self.nExp*self.nfiber,self.nimage)
 
         ineg = np.where(Afull < 0.)
         Afull[ineg] = 0.
