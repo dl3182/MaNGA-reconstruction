@@ -941,7 +941,7 @@ class ReconstructG(Reconstruct):
         dx = np.outer(xsample, np.ones(self.nimage)) - np.outer(np.ones(nsample), self.x2i.flatten())
         dy = np.outer(ysample, np.ones(self.nimage)) - np.outer(np.ones(nsample), self.y2i.flatten())
         dr = np.sqrt(dx ** 2 + dy ** 2).flatten()
-        dfwhm = (np.matlib.repmat(self.fwhm[waveindex], self.nfiber * self.nimage, 1).flatten('F'))
+        dfwhm = (np.matlib.repmat(self.fwhm[waveindex], self.nfiber * self.nimage, 1).flatten('F'))*beta
         
         radius_lim=5.5
         indices=np.where(dr.flatten()<radius_lim)[0]
@@ -951,8 +951,8 @@ class ReconstructG(Reconstruct):
         dd[:, 1] = dr.flatten()[indices]
         
         ifwhm=np.arange(0.5,2.5,0.01)
-        fwhmmin=int(self.fwhm.min()*100)-50
-        fwhmmax=int(self.fwhm.max()*100)-50
+        fwhmmin=int(dfwhm*100)-50
+        fwhmmax=int(dfwhm*100)-50
         ifwhm=ifwhm[max(fwhmmin-3,0):min(fwhmmax+3,200)]
         
         ir=np.arange(0,radius_lim,0.05)
