@@ -951,8 +951,8 @@ class ReconstructG(Reconstruct):
         dd[:, 1] = dr.flatten()[indices]
         
         ifwhm=np.arange(0.5,2.5,0.01)
-        fwhmmin=int(dfwhm*100)-50
-        fwhmmax=int(dfwhm*100)-50
+        fwhmmin=int(dfwhm.min()*100)-50
+        fwhmmax=int(dfwhm.max()*100)-50
         ifwhm=ifwhm[max(fwhmmin-3,0):min(fwhmmax+3,200)]
         
         ir=np.arange(0,radius_lim,0.05)
