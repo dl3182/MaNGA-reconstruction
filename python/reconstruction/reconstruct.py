@@ -1111,7 +1111,7 @@ def set_G(plate=None, ifu=None, release='MPL-5', waveindex=None, addexps=None,di
     base.set_flux_rss()
     base.set_flux_psf(alpha=alpha,xcen=xcen,ycen=ycen,noise=noise)
     start_time = time.time()
-    base.set_cube((beta=beta,lam=lam)
+    base.set_cube(beta=beta,lam=lam)
     stop_time = time.time()
     print("calculation time = %.2f" % (stop_time - start_time))
     if (len(base.wave) == base.rss.data['FLUX'].data.shape[1]):
