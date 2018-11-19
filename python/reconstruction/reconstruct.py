@@ -1466,7 +1466,7 @@ def write(datafile, filename):
     # IMG & PSF for each band
     card_BUNIT = fits.Card('BUNIT', 'nanomaggies/pixel')
     loc = ['IFURA', 'IFUDEC', 'OBJRA', 'OBJDEC']
-    card_loc_list = set_cardlist(loc, cubehdr) + [card_BSCALE_2, card_BZERO_2, card_BUNIT]
+    card_loc_list = set_cardlist(cubehdr,loc) + [card_BSCALE_2, card_BZERO_2, card_BUNIT]
 
     GIMG_hdr = fits.ImageHDU(name='GIMG', data=datafile.GIMG)
     GIMG_hdr = insert_cardlist(hdu=GIMG_hdr, insertpoint='EXTNAME',
