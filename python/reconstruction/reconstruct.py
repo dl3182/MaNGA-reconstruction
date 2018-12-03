@@ -257,14 +257,14 @@ class Reconstruct(object):
         (self.nkernel, length, self.x2k, self.y2k, self.xkernel, self.ykernel) = self._create_grid(self.dkernel)
 
         filename = os.path.join(os.getenv('RECONSTRUCTION_DIR'),
-                                'python', 'data', 'kernelfile.fits')
+                                'python', 'data', 'kernel_database.fits')
         kernelfile = fits.open(filename)
         self.kernelbase = kernelfile[0].data
         kernelfile.close()
         self.nkernelbase = self.kernelbase.shape[1]
 
         filename = os.path.join(os.getenv('RECONSTRUCTION_DIR'),
-                                'python', 'data', 'kernel_database.fits')
+                                'python', 'data', 'kernel_radial_database.fits')
         kernelradial = fits.open(filename)
         self.kernel_radial = kernelradial[0].data
         kernelradial.close()
