@@ -663,6 +663,7 @@ class Reconstruct(object):
         mask_nocov[index_nocov] = flagnocov
         mask_dnu[index_nocov] = flagnouse
 
+<<<<<<< HEAD
         #         index_goodfibers=np.where(flux_ivar[:,iWave])
         #         ngood=w0[index_goodfibers].sum(axis=0)
         #         mask_lowcov[np.where(ngood<0.5*ngood.max())]=flaglocov
@@ -678,6 +679,12 @@ class Reconstruct(object):
         #         ngood = ((weights[index_goodfibers]!=0).sum(axis=0))
         #         mask_lowcov[np.where(ngood<0.30*ngood.max())]=flaglocov
         #         mask_dnu[np.where(ngood<0.30*ngood.max())]=flagnouse
+=======
+        index_goodfibers = np.where(flux_ivar[:, iWave])
+        ngood=weights[index_goodfibers].sum(axis=0)
+        mask_lowcov[np.where(ngood<0.5*ngood.max())]=flaglocov
+        mask_dnu[np.where(ngood<0.5*ngood.max())]=flagnouse
+>>>>>>> 6050e5ada390b642868774373a95af10bf259bab
 
         index_deadfibers = np.where(np.bitwise_and(np.uint32(flagdeadfiber), np.uint32(flux_mask[:, iWave])))
         mask_dead = ((w0[index_deadfibers] != 0).sum(axis=0) != 0) * flagdeadfiber
@@ -964,7 +971,7 @@ class ReconstructShepard(Reconstruct):
         return (w0, wwT)
 
 
-class ReconstructG(Reconstruct):
+class ReconstructG(Reconstruct):    
     """Reconstruction of cubes from linear least square method
 
     Attributes:
@@ -995,29 +1002,29 @@ class ReconstructG(Reconstruct):
     set_rss() : Acquire the RSS data
 
     set_image_grid(dimage) : Set up the spatial grid for the cube
-
+    
     set_kernel(fwhm) : Create the kernel estimation from accessing to data base
-
+    
     set_flux_rss() : Set the flux used for reconstruction from RSS
 
     set_flux_psf(xcen=0., ycen=0.,alpha=1,noise=None) : Set the flux used for reconstruction to a PSF
-
+ 
     set_weights() : Set the weights for mapping spectra to cube
-
+    
     create_weights() : Calculate the weights for mapping spectra to cube
-
+          
     normalize_weights(w) : Normalize the weights
 
     set_cube() : Calculates and sets cube for both RSS and simulation
-
+    
     calculate_cube(flux,flux_ivar,flux_mask): Calculate the result for given flux, flux_ivar and flux_mask
 
     covar() : Calculate covariance matrix for a slice of the cube
-
+    
     mask(): Calculate mask matrix for a slice of the cube
 
     plot_slice() : Plots a slice of the cube
-
+    
     FWHM(xi=None, yi=None, PSF=None, xcen=0, ycen=0): calculate FWHM for given reconstructed image
 
     Notes:
@@ -1041,8 +1048,12 @@ class ReconstructG(Reconstruct):
      r.plot_slice(0)
 
 """
+<<<<<<< HEAD
 
     def set_Amatrix(self, xsample=None, ysample=None, ivar=None, waveindex=None, ratio=30, beta=1):
+=======
+    def set_Amatrix(self, xsample=None, ysample=None, ivar=None,waveindex=None,beta=1):
+>>>>>>> 6050e5ada390b642868774373a95af10bf259bab
         """Calculate kernel matrix for linear least square method
 
         Parameters:
@@ -1053,19 +1064,17 @@ class ReconstructG(Reconstruct):
 
         ysample : ndarray of np.float32
             Y position of samples
-
+            
         kernel : float, np.float32
             kernel at each and exposure [nExp, nkernel, nkernel]
-
+        
         lam : regularization factor (default 1E-4)
-
-        ratio: criterion to select pixels (default 30)
 
         Returns:
         -------
 
         ifit: indices of pixels selected
-
+        
         A : ndarray of np.float32
             kernel matrix [nExp * nfiber, nfit]
 
@@ -1077,6 +1086,7 @@ class ReconstructG(Reconstruct):
         nsample = len(xsample)
         dx = np.outer(xsample, np.ones(self.nimage)) - np.outer(np.ones(nsample), self.x2i.flatten())
         dy = np.outer(ysample, np.ones(self.nimage)) - np.outer(np.ones(nsample), self.y2i.flatten())
+<<<<<<< HEAD
         dr = np.sqrt(dx ** 2 + dy ** 2)
         ifit = np.where(dr.min(axis=0) <= 1.6)[0]
 
@@ -1087,10 +1097,23 @@ class ReconstructG(Reconstruct):
 
         radius_lim = 4
         indices = np.where(dr.flatten() < radius_lim)[0]
+=======
+        dr = np.sqrt(dx**2 + dy**2)
+        ifit=np.where(dr.min(axis=0) <1.6)[0]
+
+        dr=dr[:,ifit]
+        
+        dr=dr.flatten()
+        dfwhm=(np.matlib.repmat(self.fwhm[waveindex],self.nfiber*len(ifit),1).flatten('F'))       
+         
+        radius_lim=4
+        indices=np.where(dr.flatten()<radius_lim)[0]
+>>>>>>> 6050e5ada390b642868774373a95af10bf259bab
 
         dd = np.zeros([len(indices), 2])
         dd[:, 0] = dfwhm.flatten()[indices]
         dd[:, 1] = dr.flatten()[indices]
+<<<<<<< HEAD
 
         ifwhm = np.arange(0.5, 2.5, 0.001)
         fwhmmin = int(self.fwhm.min() * 1000) - 500
@@ -1109,6 +1132,25 @@ class ReconstructG(Reconstruct):
         return (ifit, A)
 
     def create_weights(self, xsample=None, ysample=None, ivar=None, waveindex=None, lam=0, ratio=30, beta=1):
+=======
+        
+        ifwhm=np.arange(0.5,2.5,0.01)
+        fwhmmin=int(self.fwhm.min()*100)-50
+        fwhmmax=int(self.fwhm.max()*100)-50
+        ifwhm=ifwhm[max(fwhmmin-3,0):min(fwhmmax+3,200)]
+        
+        ir=np.arange(0,5.5,0.05)
+        
+        Afull= interpolate.interpn((ifwhm, ir),self.kernel_radial[max(fwhmmin-3,0):min(fwhmmax+3,200),:], dd,method='linear',bounds_error=False,fill_value=0.)* (self.dimage / self.dkernel)**2
+        Afull2 = np.zeros(len(dr.flatten()))
+        Afull2[indices]=Afull
+        A=Afull2.reshape(self.nExp*self.nfiber,len(ifit))
+
+        return (ifit,A)
+        
+        
+    def create_weights(self, xsample=None, ysample=None,ivar=None,waveindex=None,lam=0,beta=1):
+>>>>>>> 6050e5ada390b642868774373a95af10bf259bab
         """Calculate weights for linear least square method
 
         Parameters:
@@ -1125,10 +1167,8 @@ class ReconstructG(Reconstruct):
 
         kernel : float, np.float32
             kernel at each and exposure [nExp, nkernel, nkernel]
-
+        
         lam : regularization factor (default 1E-4)
-
-        ratio: criterion to select pixels (default 30)
 
         Returns:
         -------
@@ -1142,46 +1182,51 @@ class ReconstructG(Reconstruct):
         -----
 
 """
+<<<<<<< HEAD
         self.ifit, A = self.set_Amatrix(xsample, ysample, ivar, waveindex, ratio, beta)
+=======
+        self.ifit,A = self.set_Amatrix(xsample,ysample,ivar,waveindex,beta)
+>>>>>>> 6050e5ada390b642868774373a95af10bf259bab
         self.nfit = len(A[0])
-        ivar = (ivar != 0)
+        ivar = (ivar!=0)
         [U, D, VT] = np.linalg.svd(np.dot(np.diag(np.sqrt(ivar)), A), full_matrices=False)
         Dinv = 1 / D
 
         self.lam = lam
         for i in range(len(D)):
-            if D[i] < 1E-6:
-                Dinv[i] = 0
-        filt = 1 / (1 + lam ** 2 * Dinv ** 2)
+            if D[i]<1E-6:
+                Dinv[i]=0
+        filt = 1/(1+lam**2*Dinv**2)
 
-        A_plus = np.dot(np.dot(VT.T, np.dot(np.diag(filt), np.diag(Dinv))), U.T)
-
-        Q = (np.dot(np.dot(VT.transpose(), np.dot(np.diag(1 / filt), np.diag(D))), VT))
+        A_plus = np.dot(np.dot(VT.T, np.dot(np.diag(filt),np.diag(Dinv))), U.T)
+        
+        Q = (np.dot(np.dot(VT.transpose(), np.dot(np.diag(1/filt),np.diag(D))), VT))
         sl = Q.sum(axis=1)
         Rl = (Q.T / sl.T).T
         where_are_NaNs = np.isnan(Rl)
         Rl[where_are_NaNs] = 0
-
-        T = np.dot(np.dot(Rl, A_plus), np.diag(np.sqrt(ivar)))
-        self.A_plus = self.set_reshape(np.dot(A_plus, np.diag(np.sqrt(ivar))))
+        
+        T = np.dot(np.dot(Rl, A_plus),np.diag(np.sqrt(ivar)))
+        self.A_plus = self.set_reshape(np.dot(A_plus,np.diag(np.sqrt(ivar))))
         wwT = self.set_reshape(T)
-        return (self.set_reshape(A.T).T, wwT)
+        return (self.set_reshape(A.T).T,wwT)
+        
 
     def set_reshape(self, inp):
         """ reshape the size of weights from selected pixels to a regular grid
-
+    
         Parameters:
         ----------
         inp : ndarray of np.float32
             input array, [nfit, size]
-
+        
         Return:
         --------
         output : ndarray of np.float32
             output array, [nside * nside, size]
-
+    
 """
-        output = np.zeros([self.nside ** 2, inp.shape[1]])
+        output = np.zeros([self.nside ** 2,inp.shape[1]])
         output[self.ifit] = inp
         return output
 
@@ -1490,10 +1535,20 @@ def write(datafile, filename):
     if 'BZERO' not in list(cubehdr.header.keys()):
         cubehdr.header.insert('BUNIT', card_BZERO, after=False)
     try:
+<<<<<<< HEAD
         card_flux_fail = fits.Card('FAIL_SLICE', str(datafile.slice_fail), 'slices failed to converge')
         cubehdr.header.insert('ZFWHM', card_flux_fail, after=True)
     except:
         pass
+=======
+        card_flux_fail=fits.Card('FAIL_SLICE',str(datafile.slice_fail),'slices failed to converge')
+        cubehdr.header.insert('ZFWHM',card_flux_fail,after=True)
+    except:
+        pass
+
+    # PSF
+    PSF_hdr = fits.ImageHDU(name='PSF', data=datafile.cube_psf, header=cubehdr.header)
+>>>>>>> 6050e5ada390b642868774373a95af10bf259bab
 
     # IVAR
     ivar_hdr = fits.ImageHDU(name='IVAR', data=datafile.cube_ivar, header=datafile.rss.data['IVAR'].header)
