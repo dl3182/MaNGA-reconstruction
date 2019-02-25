@@ -287,8 +287,8 @@ class Reconstruct(object):
             kernel value [nkernel,nkernel]
 
 """
-        index = int(fwhm * 1000 - 500)
-        index2 = fwhm * 1000 - 500 - index
+        index = int(fwhm * 100 - 50)
+        index2 = fwhm * 100 - 50 - index
         kernel = self.kernelbase[index] * (1 - index2) + self.kernelbase[index + 1] * index2
         index_p = int((self.nkernel + self.nkernelbase) / 2)
         index_m = int((self.nkernel - self.nkernelbase) / 2)
