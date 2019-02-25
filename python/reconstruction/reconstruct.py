@@ -7,6 +7,7 @@ import scipy.interpolate as interpolate
 import marvin.tools.rss as rss
 from marvin import config
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 from scipy.optimize import leastsq
 from astropy.io import fits
 from pydl.pydlutils.sdss import sdss_flagval
@@ -384,10 +385,20 @@ class Reconstruct(object):
         self.flux = self.rss.data['FLUX'].data
         self.flux_ivar = self.rss.data['IVAR'].data
         self.flux_mask = self.rss.data['MASK'].data
+
         if (self.waveindex is not None):
             self.flux = self.flux[:, self.waveindex]
             self.flux_ivar = self.flux_ivar[:, self.waveindex]
             self.flux_mask = self.flux_mask[:, self.waveindex]
+        try:
+            self.flux_disp = self.rss.data['DISP'].data
+            self.flux_predisp = self.rss.data['PREDISP'].data
+            if (self.waveindex is not None):
+                self.flux_disp = self.flux_disp[:, self.waveindex]
+                self.flux_predisp = self.flux_predisp[:, self.waveindex]
+            self.lsf_exist = True
+        except:
+            self.lsf_exist = False
 
     def create_weights(self, xsample=None, ysample=None, ivar=None, waveindex=None):
         """Calculate weights for nearest fiber
@@ -555,6 +566,11 @@ class Reconstruct(object):
         if nWave <= 3 and keyword == 'real':
             self.weights = np.zeros([nWave, self.nside * self.nside,
                                      self.nExp * self.nfiber])
+        if keyword == 'real' and self.lsf_exist:
+            self.disp = np.zeros([nWave, self.nside, self.nside],
+                                 dtype=np.float32)
+            self.predisp = np.zeros([nWave, self.nside, self.nside],
+                                    dtype=np.float32)
         for iWave in np.arange(nWave):
             if self.waveindex is None and psf_slices is True:
                 iWave = self.bbindex[iWave]
@@ -600,7 +616,18 @@ class Reconstruct(object):
             cube_mask[i, :, :] = self.mask(iWave, flux_ivar, flux_mask, w0, weights).reshape([self.nside, self.nside])
 
             i = i + 1
-
+            if keyword == 'real' and self.lsf_exist:
+                self.disp[iWave] = (
+                (np.abs(weights) / (np.matlib.repmat(np.abs(weights).sum(axis=1), weights.shape[-1], 1).T)).dot(
+                    self.flux_disp[:, iWave])).reshape(self.nside, self.nside)
+                self.predisp[iWave] = (
+                (np.abs(weights) / (np.matlib.repmat(np.abs(weights).sum(axis=1), weights.shape[-1], 1).T)).dot(
+                    self.flux_predisp[:, iWave])).reshape(self.nside, self.nside)
+        if keyword == 'real' and self.lsf_exist:
+            indices = np.isnan(self.disp)
+            self.disp[indices] = 0
+            indices = np.isnan(self.predisp)
+            self.predisp[indices] = 0
         return (cube, cube_ivar, cube_corr, cube_mask)
 
     def covar(self, iWave=None, flux_ivar=None, weights=None):
@@ -757,7 +784,7 @@ class Reconstruct(object):
         self.IIMG = self.PSFaverage('i', self.wave, self.cube)
         self.ZIMG = self.PSFaverage('z', self.wave, self.cube)
         filename = os.path.join(os.getenv('RECONSTRUCTION_DIR'),
-                                'python', 'data', 'kernel_database.fits')
+                            'python', 'data', 'kernel_database.fits')
         kernelfile = fits.open(filename)
         self.GFWHM = kernelfile[1].data[self.chi2_index(self.GPSF)[0]]
         self.RFWHM = kernelfile[1].data[self.chi2_index(self.RPSF)[0]]
@@ -1092,14 +1119,14 @@ class ReconstructG(Reconstruct):
         dd[:, 0] = dfwhm.flatten()[indices]
         dd[:, 1] = dr.flatten()[indices]
 
-        ifwhm = np.arange(0.5, 2.5, 0.001)
-        fwhmmin = int(self.fwhm.min() * 1000) - 500
-        fwhmmax = int(self.fwhm.max() * 1000) - 500
-        ifwhm = ifwhm[max(fwhmmin - 3, 0):min(fwhmmax + 3, 2000)]
+        ifwhm = np.arange(0.5, 2.5, 0.01)
+        fwhmmin = int(self.fwhm.min() * 100) - 50
+        fwhmmax = int(self.fwhm.max() * 100) - 50
+        ifwhm = ifwhm[max(fwhmmin - 3, 0):min(fwhmmax + 3, 200)]
 
         ir = np.arange(0, 5.5, 0.05)
 
-        Afull = interpolate.interpn((ifwhm, ir), self.kernel_radial[max(fwhmmin - 3, 0):min(fwhmmax + 3, 2000), :], dd,
+        Afull = interpolate.interpn((ifwhm, ir), self.kernel_radial[max(fwhmmin - 3, 0):min(fwhmmax + 3, 200), :], dd,
                                     method='linear', bounds_error=False, fill_value=0.) * (
                                                                                           self.dimage / self.dkernel) ** 2
         Afull2 = np.zeros(len(dr.flatten()))
@@ -1503,6 +1530,12 @@ def write(datafile, filename):
     mask_hdr = fits.ImageHDU(name='MASK', data=datafile.cube_mask, header=datafile.rss.data['MASK'].header)
     mask_hdr.header['HDUCLAS1'] = 'CUBE'
 
+    # DISP
+    disp_hdr = fits.ImageHDU(name='DISP', data=datafile.disp, header=datafile.rss.data['DISP'].header)
+
+    # PREDISP
+    predisp_hdr = fits.ImageHDU(name='PREDISP', data=datafile.predisp, header=datafile.rss.data['PREDISP'].header)
+
     # IMG & PSF for each band
     card_BUNIT = fits.Card('BUNIT', 'nanomaggies/pixel')
     loc = ['IFURA', 'IFUDEC', 'OBJRA', 'OBJDEC']
@@ -1543,7 +1576,7 @@ def write(datafile, filename):
     # CORR
     CORR_hdr = []
     for i in range(4):
-        corr = table_correlation(correlation=datafile.cube_corr[i].toarray(), thresh=1E-12)
+        corr = table_correlation(correlation=datafile.cube_corr[i].toarray(), thresh=1E-14)
         corr.header.append(fits.Card('BBWAVE', datafile.bbwave[i], 'Wavelength (Angstroms)'))
         corr.header.append(fits.Card('BBINDEX', datafile.bbindex[i], 'Slice number'))
         corr.header.append(fits.Card('COVTYPE', 'Correlation'))
@@ -1554,14 +1587,19 @@ def write(datafile, filename):
     CORR_hdr[2].header.append(fits.Card('EXTNAME', 'ICORREL'))
     CORR_hdr[3].header.append(fits.Card('EXTNAME', 'ZCORREL'))
 
-    if datafile.cube_psf.shape[0]>4:
+    hduRSS = []
+    for i in range(1, len(datafile.rss.data)):
+        if datafile.rss.data[i].header['XTENSION'] == 'IMAGE' and len(datafile.rss.data[i].data) == len(
+                datafile.rss.data['WAVE'].data):
+            hduRSS.append(datafile.rss.data[i])
+
+    try:
         # PSF
         PSF_hdr = fits.ImageHDU(name='PSF', data=datafile.cube_psf, header=cubehdr.header)
-        hdu = fits.HDUList([hp, cubehdr, PSF_hdr, ivar_hdr, mask_hdr,
-                            datafile.rss.data['WAVE'], datafile.rss.data['SPECRES'], datafile.rss.data['SPECRESD'],
-                            datafile.rss.data['OBSINFO'],
+        hdu = fits.HDUList([hp, cubehdr, PSF_hdr, ivar_hdr, mask_hdr, disp_hdr, predisp_hdr] + hduRSS +
+                           [datafile.rss.data['OBSINFO'],
                             GIMG_hdr, RIMG_hdr, IIMG_hdr, ZIMG_hdr, GPSF_hdr, RPSF_hdr, IPSF_hdr, ZPSF_hdr] + CORR_hdr)
-    else:
+    except:
         hdu = fits.HDUList([hp, cubehdr, ivar_hdr, mask_hdr,
                             datafile.rss.data['WAVE'], datafile.rss.data['SPECRES'], datafile.rss.data['SPECRESD'],
                             datafile.rss.data['OBSINFO'],
