@@ -3,6 +3,7 @@
 #
 import math
 import numpy as np
+import numpy.matlib
 import scipy.interpolate as interpolate
 import marvin.tools.rss as rss
 from marvin import config
@@ -14,15 +15,19 @@ from pydl.pydlutils.sdss import sdss_flagval
 from scipy import sparse
 import time
 import os
+import sys
 
 # Set Marvin configuration so it gets everything local
 config.setRelease('MPL-6')
 config.mode = 'local'
 config.download = True
 
+plt.ion()
+
 # Rough grid length in arcsec to use for each IFU size
 gridsize = {7: 12, 19: 17, 37: 22, 61: 27, 91: 32, 127: 36}
 
+RECONSTRUCTION_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
 class Reconstruct(object):
     """Base class for reconstruction of cubes from RSS files
@@ -175,7 +180,6 @@ class Reconstruct(object):
                       for i in range(self.fwhm0.shape[0])]
                      for j in range(self.nWave)]
         self.fwhm = np.array(self.fwhm)
-        #         self.fwhm = np.ones_like(self.fwhm)*self.fwhm.mean()
 
         return
 
@@ -258,14 +262,14 @@ class Reconstruct(object):
         self.dkernel = dkernel
         (self.nkernel, length, self.x2k, self.y2k, self.xkernel, self.ykernel) = self._create_grid(self.dkernel)
 
-        filename = os.path.join(os.getenv('RECONSTRUCTION_DIR'),
+        filename = os.path.join(os.getenv('RECONSTRUCTION_DIR',default=RECONSTRUCTION_DIR),
                                 'python', 'data', 'kernel_database.fits')
         kernelfile = fits.open(filename)
         self.kernelbase = kernelfile[0].data
         kernelfile.close()
         self.nkernelbase = self.kernelbase.shape[1]
 
-        filename = os.path.join(os.getenv('RECONSTRUCTION_DIR'),
+        filename = os.path.join(os.getenv('RECONSTRUCTION_DIR',default=RECONSTRUCTION_DIR),
                                 'python', 'data', 'kernel_radial_database.fits')
         kernelradial = fits.open(filename)
         self.kernel_radial = kernelradial[0].data
@@ -473,6 +477,8 @@ class Reconstruct(object):
     def set_cube(self, psf_slices=True, **kwargs):
         """Set cube for each wavelength
 
+        psf_slices: boolean, Ture if only to calculate pivot wavelengths
+
         Notes:
         -----
 
@@ -515,6 +521,10 @@ class Reconstruct(object):
 
         flux_mask: ndarray of np.int32
             mask of each fiber [nExp * nfiber, nWave]
+
+        keyword: str, "simulation" or "real"
+
+        psf_slices: boolean, Ture if only to calculate pivot wavelengths
 
         Return:
         ------
@@ -612,7 +622,7 @@ class Reconstruct(object):
                 corr[np.where(covar == 0)] = 0
                 cube_corr.append(sparse.csr_matrix(corr))
 
-                # mask
+            # mask
             cube_mask[i, :, :] = self.mask(iWave, flux_ivar, flux_mask, w0, weights).reshape([self.nside, self.nside])
 
             i = i + 1
@@ -738,6 +748,7 @@ class Reconstruct(object):
             target = self.cube_psf[iWave, :, :]
         else:
             target = self.cube[iWave, :, :]
+            keyword = ''
         map = target
         if (vmax is None):
             vmax = map.max() * 1.02
@@ -783,7 +794,7 @@ class Reconstruct(object):
         self.RIMG = self.PSFaverage('r', self.wave, self.cube)
         self.IIMG = self.PSFaverage('i', self.wave, self.cube)
         self.ZIMG = self.PSFaverage('z', self.wave, self.cube)
-        filename = os.path.join(os.getenv('RECONSTRUCTION_DIR'),
+        filename = os.path.join(os.getenv('RECONSTRUCTION_DIR',default=RECONSTRUCTION_DIR),
                             'python', 'data', 'kernel_database.fits')
         kernelfile = fits.open(filename)
         self.GFWHM = kernelfile[1].data[self.chi2_index(self.GPSF)[0]]
@@ -847,7 +858,7 @@ class Reconstruct(object):
         PSF_ave : ndarray of np.float32 [nside,nside]
             the average of cube for given band
 """
-        filterfile = os.path.join(os.getenv('RECONSTRUCTION_DIR'),
+        filterfile = os.path.join(os.getenv('RECONSTRUCTION_DIR',default=RECONSTRUCTION_DIR),
                                   'python', 'data', color + '_filter.dat')
         band0 = np.loadtxt(filterfile)
         band1 = np.arange(3400, band0[0, 0], 25)
@@ -1069,7 +1080,7 @@ class ReconstructG(Reconstruct):
 
 """
 
-    def set_Amatrix(self, xsample=None, ysample=None, ivar=None, waveindex=None, ratio=30, beta=1):
+    def set_Amatrix(self, xsample=None, ysample=None, ivar=None, waveindex=None, beta=1):
         """Calculate kernel matrix for linear least square method
 
         Parameters:
@@ -1085,8 +1096,6 @@ class ReconstructG(Reconstruct):
             kernel at each and exposure [nExp, nkernel, nkernel]
 
         lam : regularization factor (default 1E-4)
-
-        ratio: criterion to select pixels (default 30)
 
         Returns:
         -------
@@ -1110,7 +1119,8 @@ class ReconstructG(Reconstruct):
         dr = dr[:, ifit]
 
         dr = dr.flatten()
-        dfwhm = (np.matlib.repmat(self.fwhm[waveindex], self.nfiber * len(ifit), 1).flatten('F'))
+        fwhm = self.fwhm * beta
+        dfwhm = (np.matlib.repmat(fwhm[waveindex], self.nfiber * len(ifit), 1).flatten('F'))
 
         radius_lim = 4
         indices = np.where(dr.flatten() < radius_lim)[0]
@@ -1120,8 +1130,8 @@ class ReconstructG(Reconstruct):
         dd[:, 1] = dr.flatten()[indices]
 
         ifwhm = np.arange(0.5, 2.5, 0.01)
-        fwhmmin = int(self.fwhm.min() * 100) - 50
-        fwhmmax = int(self.fwhm.max() * 100) - 50
+        fwhmmin = int(fwhm.min() * 100) - 50
+        fwhmmax = int(fwhm.max() * 100) - 50
         ifwhm = ifwhm[max(fwhmmin - 3, 0):min(fwhmmax + 3, 200)]
 
         ir = np.arange(0, 5.5, 0.05)
@@ -1135,7 +1145,7 @@ class ReconstructG(Reconstruct):
 
         return (ifit, A)
 
-    def create_weights(self, xsample=None, ysample=None, ivar=None, waveindex=None, lam=0, ratio=30, beta=1):
+    def create_weights(self, xsample=None, ysample=None, ivar=None, waveindex=None, lam=0, beta=1):
         """Calculate weights for linear least square method
 
         Parameters:
@@ -1155,8 +1165,6 @@ class ReconstructG(Reconstruct):
 
         lam : regularization factor (default 1E-4)
 
-        ratio: criterion to select pixels (default 30)
-
         Returns:
         -------
         w0 : ndarray of np.float32
@@ -1169,7 +1177,7 @@ class ReconstructG(Reconstruct):
         -----
 
 """
-        self.ifit, A = self.set_Amatrix(xsample, ysample, ivar, waveindex, ratio, beta)
+        self.ifit, A = self.set_Amatrix(xsample, ysample, ivar, waveindex, beta)
         self.nfit = len(A[0])
         ivar = (ivar != 0)
         [U, D, VT] = np.linalg.svd(np.dot(np.diag(np.sqrt(ivar)), A), full_matrices=False)
@@ -1213,7 +1221,7 @@ class ReconstructG(Reconstruct):
         return output
 
 
-def set_base(plate=None, ifu=None, release='MPL-5', waveindex=None, dimage=0.75, dkernel=0.05):
+def set_base(plate=None, ifu=None, release='MPL-6', waveindex=None, dimage=0.75, dkernel=0.05):
     """ set the grid and fiber fluxes
 
         Parameters:
@@ -1245,7 +1253,7 @@ def set_base(plate=None, ifu=None, release='MPL-5', waveindex=None, dimage=0.75,
     return base
 
 
-def set_G(plate=None, ifu=None, release='MPL-5', waveindex=None, dimage=0.75, lam=0, alpha=1, beta=1, xcen=None,
+def set_G(plate=None, ifu=None, release='MPL-6', waveindex=None, dimage=0.75, lam=0, alpha=1, beta=1, xcen=None,
           ycen=None, noise=None, psf_slices=True):
     """ Linear least square method for the reconstruction
 
@@ -1285,6 +1293,8 @@ def set_G(plate=None, ifu=None, release='MPL-5', waveindex=None, dimage=0.75, la
         noise: default=0,np.float32
              scale factor of simulated flux to generate noise
 
+        psf_slices: boolean, Ture if only to calculate pivot wavelengths
+
         Return:
         --------
         base: object that includes information of grid and fiber fluxes and reconstruction image
@@ -1299,13 +1309,14 @@ def set_G(plate=None, ifu=None, release='MPL-5', waveindex=None, dimage=0.75, la
     start_time = time.time()
     base.set_cube(psf_slices=psf_slices, beta=beta, lam=lam)
     stop_time = time.time()
-    print("G‘s calculation time = %.2f" % (stop_time - start_time))
+    if len(base.waveindex)>4000:
+        print("CRR‘s calculation time = %.2f" % (stop_time - start_time))
     if (len(base.wave) == base.rss.data['FLUX'].data.shape[1]):
         base.set_band()
     return base
 
 
-def set_Shepard(plate=None, ifu=None, release='MPL-5', waveindex=None, dimage=0.75, alpha=1, beta=1, xcen=None,
+def set_Shepard(plate=None, ifu=None, release='MPL-6', waveindex=None, dimage=0.75, alpha=1, beta=1, xcen=None,
                 ycen=None, noise=None, psf_slices=True):
     """ Shepard's method for the reconstruction
 
@@ -1339,6 +1350,8 @@ def set_Shepard(plate=None, ifu=None, release='MPL-5', waveindex=None, dimage=0.
         noise: default=0,np.float32
              scale factor of simulated flux to generate noise
 
+        psf_slices: boolean, Ture if only to calculate pivot wavelengths
+
         Return:
         --------
         base: object that includes information of grid and fiber fluxes
@@ -1353,7 +1366,8 @@ def set_Shepard(plate=None, ifu=None, release='MPL-5', waveindex=None, dimage=0.
     start_time = time.time()
     base.set_cube(psf_slices=psf_slices)
     stop_time = time.time()
-    print("calculation time = %.2f" % (stop_time - start_time))
+    if len(base.waveindex)>4000:
+        print("Shepard calculation time = %.2f" % (stop_time - start_time))
     if (len(base.wave) == base.rss.data['FLUX'].data.shape[1]):
         base.set_band()
     return base
@@ -1477,14 +1491,14 @@ def write(datafile, filename):
     card_BSCALE_2 = fits.Card('BSCALE', 1.00000, 'Flux unit scaling')
     card_BZERO_2 = fits.Card('BZERO', 0.00000, 'Flux zeropoint')
 
-    card_WCS_1 = fits.Card('CRPIX1', (datafile.nside - 1) / 2, 'Reference pixel (1-indexed)')
-    card_WCS_2 = fits.Card('CRPIX2', (datafile.nside - 1) / 2, 'Reference pixel (1-indexed)')
+    card_WCS_1 = fits.Card('CRPIX1', (datafile.nside + 1) / 2, 'Reference pixel (1-indexed)')
+    card_WCS_2 = fits.Card('CRPIX2', (datafile.nside + 1) / 2, 'Reference pixel (1-indexed)')
     card_WCS_3 = fits.Card('CRVAL1', datafile.rss.data['FLUX'].header['IFURA'])
     card_WCS_4 = fits.Card('CRVAL2', datafile.rss.data['FLUX'].header['IFUDEC'])
-    card_WCS_5 = fits.Card('CD1_1', round(-0.5 / 3600, 9))
-    card_WCS_6 = fits.Card('CD2_2', round(0.5 / 3600, 9))
+    card_WCS_5 = fits.Card('CD1_1', round(-datafile.length/datafile.nside / 3600, 9))
+    card_WCS_6 = fits.Card('CD2_2', round(datafile.length/datafile.nside / 3600, 9))
     card_WCS_7 = fits.Card('CTYPE1', 'RA---TAN')
-    card_WCS_8 = fits.Card('CTYPE2', 'DEC---TAN')
+    card_WCS_8 = fits.Card('CTYPE2', 'DEC--TAN')
     card_WCS_9 = fits.Card('CUNIT1', 'deg')
     card_WCS_10 = fits.Card('CUNIT2', 'deg')
     card_WCS_list = [card_WCS_1, card_WCS_2, card_WCS_3, card_WCS_4, card_WCS_5, card_WCS_6, card_WCS_7, card_WCS_8,
@@ -1605,9 +1619,42 @@ def write(datafile, filename):
                             datafile.rss.data['OBSINFO'],
                             GIMG_hdr, RIMG_hdr, IIMG_hdr, ZIMG_hdr, GPSF_hdr, RPSF_hdr, IPSF_hdr, ZPSF_hdr] + CORR_hdr)
 
-    data = filename + ".fits".format(filename=filename)
+    if filename and len(filename)>8 and filename[-8:]=='fits.gz':
+        data = filename
+    else:
+        data = filename + ".fits.gz".format(filename=filename)
     hdu.writeto(data, clobber=True, checksum=True)
 
     hdu.close()
 
     return hdu
+
+if __name__ == '__main__':
+    # print('input: plate-ifu,CRR,Shepard,pixelsize')
+    dir_path = os.path.dirname(os.path.realpath(__file__))
+    parent_dir_path = os.path.dirname(dir_path)
+    parent_parent_dir_path = os.path.dirname(parent_dir_path)
+
+    input = sys.argv
+    if len(input)<2:
+        raise ValueError('plateifu should be given for generating cubes')
+    plateifu = input[1]
+    [plate,ifu] = plateifu.split('-')
+    plate = int(plate)
+    ifu = int(ifu)
+    pixelsize = 0.75
+    if len(input)>4:
+        pixelsize = input[4]
+    if len(input)>3 and input[3]==False:
+        pass
+    else:
+        print(plate,ifu)
+        SpectrumShep=set_Shepard(plate=plate, ifu=ifu, release='MPL-6',waveindex=None,dimage=pixelsize,psf_slices=True)
+        saveaddress = parent_parent_dir_path+'/files/Shepard_fitsfile/manga-'+plateifu+'-LOGCUBE'
+        Shepard_cube=write(SpectrumShep, saveaddress)
+    if len(input)>2 and input[2]==False:
+        pass
+    else:
+        SpectrumG=set_G(plate=plate, ifu=ifu, release='MPL-6',waveindex=None,lam=1E-3,dimage=pixelsize,psf_slices=True)
+        saveaddress = parent_parent_dir_path+'files/CRR_fitsfile/manga-'+plateifu+'-LOGCUBE'
+        G_cube=write(SpectrumG, saveaddress)
